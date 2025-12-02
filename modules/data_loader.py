@@ -66,7 +66,14 @@ def get_us_metrics() -> dict:
                     if series is not None and len(series) > 0:
                         # Get most recent non-NaN value
                         latest = series.dropna().iloc[-1]
-                        result[key] = float(latest)
+                        val = float(latest)
+                        
+                        # Normalize units (FRED varies between Millions and Billions)
+                        # GFDEBTN is in Millions, others are in Billions
+                        if series_id == "GFDEBTN":
+                            val = val / 1000.0
+                            
+                        result[key] = val
                 except Exception as e:
                     result["errors"].append(f"FRED {series_id}: {str(e)}")
         except Exception as e:

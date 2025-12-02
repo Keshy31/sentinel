@@ -28,6 +28,7 @@ graph TD
         B1[Fetcher: FRED API] --> |US Macro Data| B
         B2[Fetcher: YFinance] --> |Live Market Data| B
         B3[Loader: JSON Config] --> |SA Fiscal Data| B
+        B4[(SQLite Cache)] <--> |Read/Write| B
     end
 
     subgraph Logic Engine
@@ -70,13 +71,40 @@ project_sentinel/
       * `rich`: For the dashboard UI (Tables, Panels, Layouts).
       * `plotext`: For rendering time-series charts inside the terminal.
       * `pandas`: For data manipulation and time-series alignment.
+      * `sqlite3`: Standard library for local data caching.
       * `fredapi`: To fetch US economic data (Official Fed API).
       * `yfinance`: To fetch live bond yields and currency pairs.
       * `python-dotenv`: To manage security (API Keys).
 
 ## 4\. Data Ingestion Strategy
 
-We use a **Hybrid Data Model**: Automated API calls for the US, and a "Live Market + Manual Fiscal" mix for South Africa.
+We use a **Hybrid Data Model**: Automated API calls for the US, and a "Live Market + Manual Fiscal" mix for South Africa, all backed by a **SQLite Cache**.
+
+### Caching Layer (`sentinel.db`)
+
+To ensure resilience and speed, all network requests are cached.
+
+**Schema:**
+```sql
+CREATE TABLE IF NOT EXISTS metric_cache (
+    key TEXT PRIMARY KEY,       -- e.g., "US_GDP", "US_10Y"
+    value REAL,                 -- The numeric value
+    timestamp DATETIME,         -- When it was fetched
+    source TEXT                 -- "FRED", "YFINANCE"
+);
+
+CREATE TABLE IF NOT EXISTS chart_cache (
+    ticker TEXT PRIMARY KEY,    -- e.g., "^TNX"
+    data_json TEXT,             -- Serialized JSON of the DataFrame
+    timestamp DATETIME
+);
+```
+
+**Strategy:**
+1.  **Check Cache:** Is data present and fresh (< 24h for Macro, < 15m for Market)?
+2.  **Hit:** Return cached value.
+3.  **Miss:** Call API $\rightarrow$ Save to DB $\rightarrow$ Return value.
+4.  **Error:** Return last known cached value (if any) with `is_stale=True`.
 
 ### A. United States (Automated)
 
@@ -151,9 +179,11 @@ The dashboard utilizes `rich.layout` to split the terminal into a grid.
 
 ### Phase 1: Data Harness (No UI)
 
-  * **Task:** Create `modules/data_loader.py`.
-  * **Goal:** Write two functions: `get_us_metrics()` and `get_sa_metrics()`.
-  * **Verification:** Create a temporary `test.py` that prints the raw Dictionary of data to the console. Ensure FRED API key works.
+  * **Task:** Create `modules/data_loader.py` and `modules/db_manager.py`.
+  * **Goal:** 
+      * Implement `init_db()` to create SQLite tables.
+      * Write two functions: `get_us_metrics()` and `get_sa_metrics()` that respect the cache.
+  * **Verification:** Run `test.py` twice. Second run should be instant (hitting cache) and work without internet.
 
 ### Phase 2: The Chart Engine
 

@@ -32,6 +32,7 @@ The dashboard does not just show numbers; it evaluates the **health of the debt 
   * **Interface:** `rich` library (for "Bloomberg Terminal" style aesthetics).
   * **Charts:** `plotext` (for rendering time-series charts inside the terminal).
   * **Data Processing:** `pandas`.
+  * **Caching:** `sqlite3` (Standard Library) for offline capabilities and rate-limit handling.
   * **Live Market Data:** `yfinance` (Yahoo Finance API).
   * **US Macro Data:** `fredapi` (Federal Reserve Economic Data).
   * **Configuration:** `JSON` (for manual entry of South African fiscal data).
@@ -41,10 +42,12 @@ The dashboard does not just show numbers; it evaluates the **health of the debt 
 
 ```text
 [Yahoo Finance API] --> (Live Yields/FX) -----\
-                                              |--> [Data Processing Engine] --> [Rich UI Renderer]
-[FRED API] -----------> (US Debt/GDP/Tax) ----/             |
+                                              |--> [Data Processing Engine] <--> [SQLite Cache]
+[FRED API] -----------> (US Debt/GDP/Tax) ----/             |                    (Persistence)
                                                             |
-[config.json] --------> (SA Fiscal Data) -------------------/
+[config.json] --------> (SA Fiscal Data) -------------------/                         |
+                                                                                      v
+                                                                             [Rich UI Renderer]
 ```
 
 ## 4\. Data Strategy
@@ -60,29 +63,13 @@ We will programmatically fetch all US metrics to ensure real-time accuracy.
       * Federal Tax Receipts (`W006RC1Q027SBEA`).
       * GDP Growth (`GDP`).
 
-### B. South Africa (Hybrid Model)
+### C. Caching Strategy (SQLite)
 
-Due to API limitations, SA data will be a mix of live market feeds and manually updated fiscal targets (updated via a simple text file).
+To prevent API rate limits and enable offline startup, all fetched data is cached in a local `sentinel.db`.
 
-  * **Market Data (Live):**
-      * USD/ZAR Exchange Rate (`ZAR=X`).
-      * SA 10Y Bond Yield (Proxy via Yahoo or hardcoded spread).
-  * **Fiscal Data (Manual Input):**
-      * Loaded from `data/sa_fiscal.json`.
-      * User updates this quarterly/annually based on the Budget Speech (MTBPS).
-
-**Example `sa_fiscal.json` structure:**
-
-```json
-{
-  "last_updated": "2024-10-30",
-  "debt_zar_billions": 5200.0,
-  "annual_revenue_zar_billions": 1850.0,
-  "annual_interest_expense_zar_billions": 380.0,
-  "gdp_growth_forecast_pct": 1.1,
-  "bond_yield_10y_static": 11.5
-}
-```
+  * **Macro Data:** Cached for 24 hours.
+  * **Market Data:** Cached for 15 minutes.
+  * **Fallback:** If API fails, display last known good value from DB with a "STALE" warning.
 
 ## 5\. Development Phases
 
@@ -99,14 +86,19 @@ We will build this in 4 distinct phases. Each phase results in a testable milest
 
 ### Phase 2: The Logic Engine & Hybrid Integration
 
-  * **Goal:** Implement the "Dalio Math" and the Manual Data Loader.
+  * **Goal:** Implement the "Dalio Math", the Manual Data Loader, and **SQLite Caching**.
   * **Deliverables:**
       * **Calculation Module:**
           * Compute US Interest/Revenue Ratio.
           * Compute US ($r - g$).
+      * **Persistence Layer:**
+          * Implement `DatabaseManager` class using `sqlite3`.
+          * Create tables for `metrics` and `historical_charts`.
       * **Config Loader:** Create the Python function to read `sa_fiscal.json`.
       * **SA Calculation:** Compute SA Interest/Revenue using the JSON data.
-  * **Test:** Change a number in `sa_fiscal.json` $\rightarrow$ Run script $\rightarrow$ See the calculated ratio change.
+  * **Test:**
+      * Change a number in `sa_fiscal.json` $\rightarrow$ Run script $\rightarrow$ See the calculated ratio change.
+      * Disconnect Internet $\rightarrow$ Run script $\rightarrow$ Verify data loads from Cache.
 
 ### Phase 3: The Dashboard (UI Implementation)
 

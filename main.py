@@ -4,14 +4,17 @@ Project Sentinel - Sovereign Debt & Fiscal Dominance Monitor
 
 Entry point for the dashboard application.
 Phase 1: Test harness to verify data fetching works.
+Phase 2: Chart engine integration.
 """
 
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
+from rich.columns import Columns
+from rich.text import Text
 from rich import box
 
-from modules import data_loader, logic
+from modules import data_loader, logic, render_chart
 import config
 
 
@@ -39,7 +42,7 @@ def format_ratio_with_status(ratio: float, suffix: str = "%") -> str:
     return f"[bold green]{ratio_pct:.1f}{suffix}[/bold green] [green]SAFE[/green]"
 
 
-def display_us_data(console: Console, data: dict) -> None:
+def display_us_data(console: Console, data: dict, show_sparkline: bool = True) -> None:
     """Display US economic data in a formatted panel."""
     table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
     table.add_column("Metric", style="cyan")
@@ -63,8 +66,21 @@ def display_us_data(console: Console, data: dict) -> None:
         debt_gdp = logic.calculate_debt_to_gdp_ratio(data["total_debt"], data["gdp"])
         table.add_row("Debt/GDP Ratio", format_value(debt_gdp, "%", 1))
     
-    panel = Panel(
-        table,
+    # Build content with optional sparkline
+    if show_sparkline:
+        sparkline = render_chart.build_sparkline("^TNX", months=6, width=36, height=4)
+        from rich.console import Group
+        content = Group(
+            table,
+            Text(""),
+            Text("10Y Yield Trend (6mo):", style="dim cyan"),
+            Text.from_ansi(sparkline)
+        )
+    else:
+        content = table
+    
+    panel = Panel.fit(
+        content,
         title="[bold blue]🇺🇸 UNITED STATES[/bold blue]",
         border_style="blue"
     )
@@ -77,7 +93,7 @@ def display_us_data(console: Console, data: dict) -> None:
             console.print(f"  [red]• {error}[/red]")
 
 
-def display_sa_data(console: Console, data: dict) -> None:
+def display_sa_data(console: Console, data: dict, show_sparkline: bool = True) -> None:
     """Display South African economic data in a formatted panel."""
     table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
     table.add_column("Metric", style="cyan")
@@ -106,8 +122,21 @@ def display_sa_data(console: Console, data: dict) -> None:
         color = "red" if status == "CRITICAL" else "green"
         table.add_row("Growth Spread (r - g)", f"[bold {color}]{spread:+.1f}%[/bold {color}]")
     
-    panel = Panel(
-        table,
+    # Build content with optional sparkline
+    if show_sparkline:
+        sparkline = render_chart.build_sparkline("ZAR=X", months=6, width=36, height=4)
+        from rich.console import Group
+        content = Group(
+            table,
+            Text(""),
+            Text("USD/ZAR Trend (6mo):", style="dim cyan"),
+            Text.from_ansi(sparkline)
+        )
+    else:
+        content = table
+    
+    panel = Panel.fit(
+        content,
         title="[bold green]🇿🇦 SOUTH AFRICA[/bold green]",
         subtitle=f"[dim]Data from: {data.get('last_updated', 'Unknown')}[/dim]",
         border_style="green"
@@ -121,8 +150,34 @@ def display_sa_data(console: Console, data: dict) -> None:
             console.print(f"  [red]• {error}[/red]")
 
 
+def display_full_charts(console: Console) -> None:
+    """Display detailed full charts for both markets."""
+    console.print()
+    console.print("[bold cyan]📊 Detailed Charts[/bold cyan]")
+    console.print()
+    
+    # US 10Y Treasury Yield Chart
+    console.print("[yellow]Building US 10Y Treasury chart...[/yellow]")
+    us_chart = render_chart.build_full_chart("^TNX", months=6, width=60, height=10)
+    console.print(Panel.fit(
+        Text.from_ansi(us_chart),
+        title="[bold blue]US 10Y Treasury Yield[/bold blue]",
+        border_style="blue"
+    ))
+    console.print()
+    
+    # USD/ZAR Chart
+    console.print("[yellow]Building USD/ZAR chart...[/yellow]")
+    zar_chart = render_chart.build_full_chart("ZAR=X", months=6, width=60, height=10)
+    console.print(Panel.fit(
+        Text.from_ansi(zar_chart),
+        title="[bold green]USD/ZAR Exchange Rate[/bold green]",
+        border_style="green"
+    ))
+
+
 def main():
-    """Main entry point - Phase 1 test harness."""
+    """Main entry point - Phase 1 & 2 test harness."""
     console = Console()
     
     console.print()
@@ -134,21 +189,21 @@ def main():
     ))
     console.print()
     
-    # Phase 1: Test data fetching
-    console.print("[bold cyan]Phase 1: Data Harness Test[/bold cyan]")
+    # Phase 1 & 2: Test data fetching and charts
+    console.print("[bold cyan]Phase 1 & 2: Data Harness + Chart Engine Test[/bold cyan]")
     console.print("[dim]Fetching data from FRED, YFinance, and local JSON...[/dim]")
     console.print()
     
     # Fetch US data
     console.print("[yellow]Fetching US metrics...[/yellow]")
     us_data = data_loader.get_us_metrics()
-    display_us_data(console, us_data)
+    display_us_data(console, us_data, show_sparkline=True)
     console.print()
     
     # Fetch SA data
     console.print("[yellow]Fetching SA metrics...[/yellow]")
     sa_data = data_loader.get_sa_metrics()
-    display_sa_data(console, sa_data)
+    display_sa_data(console, sa_data, show_sparkline=True)
     console.print()
     
     # Fetch live market data
@@ -162,7 +217,7 @@ def main():
     live_table.add_row("USD/ZAR", format_value(live_data.get("usd_zar"), "", 4))
     live_table.add_row("Timestamp", live_data.get("timestamp", "Unknown"))
     
-    console.print(Panel(
+    console.print(Panel.fit(
         live_table,
         title="[bold magenta]📡 LIVE MARKET DATA[/bold magenta]",
         border_style="magenta"
@@ -172,11 +227,13 @@ def main():
         for error in live_data["errors"]:
             console.print(f"  [red]• {error}[/red]")
     
+    # Phase 2: Display full detailed charts
+    display_full_charts(console)
+    
     console.print()
-    console.print("[bold green]✓ Phase 1 Complete[/bold green]")
-    console.print("[dim]Next: Implement Phase 2 (Chart Engine) and Phase 3 (Dashboard Assembly)[/dim]")
+    console.print("[bold green]✓ Phase 1 & 2 Complete[/bold green]")
+    console.print("[dim]Next: Implement Phase 3 (Dashboard Assembly with Rich Live)[/dim]")
 
 
 if __name__ == "__main__":
     main()
-
