@@ -1,0 +1,7 @@
+rich>=13.7.0
+plotext>=5.2.8
+pandas>=2.1.0
+fredapi>=0.5.1
+yfinance>=0.2.36
+python-dotenv>=1.0.0
+
