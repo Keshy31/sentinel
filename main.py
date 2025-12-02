@@ -178,6 +178,9 @@ def display_full_charts(console: Console) -> None:
 
 def main():
     """Main entry point - Phase 1 & 2 test harness."""
+    # Initialize database
+    data_loader.init_db()
+    
     console = Console()
     
     console.print()

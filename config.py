@@ -23,6 +23,7 @@ FRED_API_KEY = os.getenv("FRED_API_KEY")
 PROJECT_ROOT = Path(__file__).parent
 DATA_DIR = PROJECT_ROOT / "data"
 SA_FISCAL_JSON_PATH = DATA_DIR / "sa_fiscal.json"
+DB_PATH = PROJECT_ROOT / "sentinel.db"
 
 # =============================================================================
 # FRED Series IDs (US Economic Data)
@@ -65,3 +66,8 @@ THRESHOLDS = {
 REFRESH_INTERVAL_SECONDS = 60  # How often to refresh data
 CHART_HISTORY_MONTHS = 6       # Months of history for sparkline charts
 
+# =============================================================================
+# Cache Settings
+# =============================================================================
+CACHE_EXPIRY_MACRO = 86400     # 24 hours in seconds
+CACHE_EXPIRY_MARKET = 900      # 15 minutes in seconds
