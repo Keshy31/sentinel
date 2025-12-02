@@ -112,6 +112,7 @@ def get_us_metrics() -> dict:
         "tax_receipts": None,
         "gdp": None,
         "yield_10y": None,
+        "inflation_yoy": None,
         "last_updated": datetime.now().isoformat(),
         "errors": []
     }
@@ -131,8 +132,24 @@ def get_us_metrics() -> dict:
             return val
         return None
 
+    # Helper to calculate Inflation YoY
+    def fetch_inflation_yoy():
+        if not fred:
+            return None
+        # Fetch full series to ensure we have enough history
+        # (FRED API is fast enough to fetch all, or we could limit by date, but simple is robust)
+        series = fred.get_series(config.FRED_SERIES["cpi"])
+        if series is not None and len(series) >= 13:
+            series = series.dropna()
+            current = series.iloc[-1]
+            year_ago = series.iloc[-13]
+            return ((current - year_ago) / year_ago) * 100
+        return None
+
     # Process FRED metrics
     for key, series_id in config.FRED_SERIES.items():
+        if key == "cpi": continue # Handled separately via inflation calculation
+        
         val = get_cached_or_fetch(
             key=key,
             fetch_func=lambda s=series_id: fetch_fred_series(s),
@@ -141,6 +158,15 @@ def get_us_metrics() -> dict:
             errors_list=result["errors"]
         )
         result[key] = val
+
+    # Process Inflation
+    result["inflation_yoy"] = get_cached_or_fetch(
+        key="inflation_yoy",
+        fetch_func=fetch_inflation_yoy,
+        expiry_seconds=config.CACHE_EXPIRY_MACRO,
+        source_name="FRED (CPIAUCSL)",
+        errors_list=result["errors"]
+    )
 
     # Process US 10Y Yield
     def fetch_us_10y():

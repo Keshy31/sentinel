@@ -33,6 +33,7 @@ FRED_SERIES = {
     "interest_payments": "A091RC1Q027SBEA", # Federal Gov Interest Payments (Quarterly)
     "tax_receipts": "W006RC1Q027SBEA",      # Federal Gov Tax Receipts (Quarterly)
     "gdp": "GDP",                           # Gross Domestic Product (Quarterly)
+    "cpi": "CPIAUCSL",                      # Consumer Price Index (Monthly)
 }
 
 # =============================================================================
@@ -58,6 +59,12 @@ THRESHOLDS = {
     # USD/ZAR thresholds
     "usd_zar_warning": 18.0,         # Elevated
     "usd_zar_critical": 19.0,        # Critical - Flash warning
+    
+    # Debt/GDP Thresholds (%)
+    "us_debt_gdp_warning": 100.0,
+    "us_debt_gdp_critical": 120.0,
+    "sa_debt_gdp_warning": 70.0,
+    "sa_debt_gdp_critical": 90.0,
 }
 
 # =============================================================================
