@@ -17,6 +17,7 @@ from modules import data_loader
 TICKER_LABELS = {
     "^TNX": "US 10Y Treasury Yield",
     "ZAR=X": "USD/ZAR Exchange Rate",
+    "US_GROWTH_SPREAD": "US Growth Spread (Yield - GDP)",
 }
 
 
@@ -60,7 +61,7 @@ def build_sparkline(
     ticker: str,
     months: int = 6,
     width: int = 40,
-    height: int = 5
+    height: int = 10
 ) -> str:
     """
     Build a compact ASCII sparkline chart for dashboard panels.

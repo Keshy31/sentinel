@@ -70,14 +70,20 @@ def create_us_panel(data: dict) -> Panel:
     table.add_row("Tax Receipts", format_value(data.get("tax_receipts"), " B", 1))
     table.add_row("10Y Treasury Yield", format_value(data.get("yield_10y"), "%", 2))
     
-    # Real Yield
+    # Real Yield & Growth Spread
     yield_10y = data.get("yield_10y")
     inflation = data.get("inflation_yoy")
+    gdp_growth = data.get("gdp_growth")
+    
     if yield_10y is not None and inflation is not None:
         real_yield = logic.calculate_real_yield(yield_10y, inflation)
         table.add_row("Real Yield (r-i)", format_value(real_yield, "%", 2))
-    elif inflation is not None:
-        table.add_row("Inflation (CPI YoY)", format_value(inflation, "%", 2))
+    
+    if yield_10y is not None and gdp_growth is not None:
+        spread = logic.calculate_growth_spread(yield_10y, gdp_growth)
+        status = logic.get_growth_spread_status(spread)
+        color = "red" if status == "CRITICAL" else "green"
+        table.add_row("Growth Spread (r-g)", f"[bold {color}]{spread:+.1f}%[/bold {color}]")
 
     # Ratios
     if data.get("interest_payments") and data.get("tax_receipts"):
@@ -104,7 +110,7 @@ def create_us_panel(data: dict) -> Panel:
         table.add_row("[bold white on red]⚠️ VIGILANTE ATTACK[/bold white on red]", "")
 
     # Sparkline
-    sparkline = render_chart.build_sparkline("^TNX", months=6, width=40, height=5)
+    sparkline = render_chart.build_sparkline("^TNX", months=6, width=40, height=10)
     
     content = Group(
         table,
@@ -142,6 +148,31 @@ def create_sa_panel(data: dict) -> Panel:
     table.add_row("10Y Yield (Static)", format_value(data.get("bond_yield_10y_static"), "%", 1))
     table.add_row("USD/ZAR (Live)", format_value(data.get("usd_zar"), "", 2))
     
+    # Debt/GDP (Estimated or Actual)
+    rev = data.get("annual_revenue_zar_billions")
+    debt = data.get("debt_zar_billions")
+    gdp = data.get("gdp_zar_billions")
+    
+    if debt:
+        if gdp:
+            debt_gdp = logic.calculate_debt_to_gdp_ratio(debt, gdp)
+            label = "Debt/GDP"
+        elif rev:
+            est_gdp = rev * 4.0 # Estimate GDP as ~4x Revenue
+            debt_gdp = logic.calculate_debt_to_gdp_ratio(debt, est_gdp)
+            label = "Debt/GDP (Est)"
+        else:
+            debt_gdp = None
+            
+        if debt_gdp is not None:
+            # Color code
+            status = logic.get_debt_gdp_status(debt_gdp, is_emerging_market=True)
+            color = "white"
+            if status == "CRITICAL": color = "red"
+            elif status == "WARNING": color = "yellow"
+            
+            table.add_row(label, f"[{color}]{debt_gdp:.1f}%[/{color}]")
+
     # Ratios
     interest = data.get("annual_interest_expense_zar_billions")
     revenue = data.get("annual_revenue_zar_billions")
@@ -165,7 +196,7 @@ def create_sa_panel(data: dict) -> Panel:
         table.add_row("[bold white on red]⚠️ CURRENCY CRISIS[/bold white on red]", "")
 
     # Sparkline
-    sparkline = render_chart.build_sparkline("ZAR=X", months=6, width=40, height=5)
+    sparkline = render_chart.build_sparkline("ZAR=X", months=6, width=40, height=10)
     
     content = Group(
         table,
@@ -188,6 +219,23 @@ def create_sa_panel(data: dict) -> Panel:
         title="[bold green]🇿🇦 SOUTH AFRICA (Emerging Mkt)[/bold green]",
         subtitle=f"[dim]Data: {data.get('last_updated', 'Unknown')}[/dim]",
         border_style=border_style
+    )
+
+
+def create_charts_panel() -> Panel:
+    """Create the historical charts panel."""
+    # US Growth Spread Chart (US_GROWTH_SPREAD)
+    chart = render_chart.build_full_chart("US_GROWTH_SPREAD", months=6, width=80, height=12)
+    
+    content = Group(
+        Text("US Growth Spread (Yield vs GDP) - 6 Month Trend", style="bold cyan"),
+        Text.from_ansi(chart)
+    )
+    
+    return Panel(
+        content,
+        title="[bold yellow]MACRO TRENDS[/bold yellow]",
+        border_style="yellow"
     )
 
 
@@ -239,13 +287,21 @@ def build_dashboard_layout(us_data: dict, sa_data: dict, blink_state: bool = Tru
     
     layout["header"].update(create_header(blink_state))
     
-    layout["main"].split_row(
+    # Split main into live metrics (top) and historical charts (bottom)
+    layout["main"].split_column(
+        Layout(name="live_metrics", ratio=1),
+        Layout(name="historical_charts", ratio=1)
+    )
+    
+    layout["live_metrics"].split_row(
         Layout(name="us_panel", ratio=1),
         Layout(name="sa_panel", ratio=1)
     )
     
     layout["us_panel"].update(create_us_panel(us_data))
     layout["sa_panel"].update(create_sa_panel(sa_data))
+    
+    layout["historical_charts"].update(create_charts_panel())
     
     layout["footer"].update(create_footer(us_data, sa_data))
     

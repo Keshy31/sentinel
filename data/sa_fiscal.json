@@ -1,9 +1,9 @@
 {
-  "last_updated": "2024-10-30",
-  "debt_zar_billions": 5200.0,
-  "annual_revenue_zar_billions": 1850.0,
-  "annual_interest_expense_zar_billions": 380.0,
-  "gdp_growth_forecast_pct": 1.1,
-  "bond_yield_10y_static": 11.5
+  "last_updated": "2025-12-02",
+  "debt_zar_billions": 6100.0,
+  "annual_revenue_zar_billions": 2005.0,
+  "annual_interest_expense_zar_billions": 426.0,
+  "gdp_zar_billions": 7600.0,
+  "gdp_growth_forecast_pct": 1.2,
+  "bond_yield_10y_static": 8.46
 }
-

@@ -112,6 +112,7 @@ def get_us_metrics() -> dict:
         "tax_receipts": None,
         "gdp": None,
         "yield_10y": None,
+        "gdp_growth": None,
         "inflation_yoy": None,
         "last_updated": datetime.now().isoformat(),
         "errors": []
@@ -198,6 +199,7 @@ def get_sa_metrics() -> dict:
         "debt_zar_billions": None,
         "annual_revenue_zar_billions": None,
         "annual_interest_expense_zar_billions": None,
+        "gdp_zar_billions": None,
         "gdp_growth_forecast_pct": None,
         "bond_yield_10y_static": None,
         "usd_zar": None,
@@ -215,6 +217,7 @@ def get_sa_metrics() -> dict:
             result["debt_zar_billions"] = data.get("debt_zar_billions")
             result["annual_revenue_zar_billions"] = data.get("annual_revenue_zar_billions")
             result["annual_interest_expense_zar_billions"] = data.get("annual_interest_expense_zar_billions")
+            result["gdp_zar_billions"] = data.get("gdp_zar_billions")
             result["gdp_growth_forecast_pct"] = data.get("gdp_growth_forecast_pct")
             result["bond_yield_10y_static"] = data.get("bond_yield_10y_static")
             result["last_updated"] = data.get("last_updated")
@@ -304,6 +307,29 @@ def get_historical_data(ticker_symbol: str, period: str = "6mo") -> Optional[pd.
     cached = db.get_chart(ticker_symbol)
     if cached and is_fresh(cached['timestamp'], config.CACHE_EXPIRY_MARKET):
         return cached['data']
+
+    # Special handling for US Growth Spread
+    if ticker_symbol == "US_GROWTH_SPREAD":
+        try:
+            # Fetch US 10Y Yield History
+            ticker = yf.Ticker(config.YFINANCE_TICKERS["us_10y_yield"])
+            hist = ticker.history(period=period)
+            
+            # Fetch latest GDP Growth (use static scalar for this 6mo view)
+            # In a full production app, we would resample quarterly GDP to daily
+            gdp_growth_entry = db.get_metric("gdp_growth")
+            gdp_growth = gdp_growth_entry['value'] if gdp_growth_entry else 2.0 # Fallback default
+            
+            if not hist.empty:
+                # Calculate Spread: Yield - GDP Growth
+                hist["Close"] = hist["Close"] - gdp_growth
+                df = hist[["Close"]]
+                db.set_chart(ticker_symbol, df)
+                return df
+            return None
+        except Exception as e:
+            print(f"Error calculating US Growth Spread: {e}")
+            return None
         
     try:
         ticker = yf.Ticker(ticker_symbol)

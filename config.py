@@ -33,6 +33,7 @@ FRED_SERIES = {
     "interest_payments": "A091RC1Q027SBEA", # Federal Gov Interest Payments (Quarterly)
     "tax_receipts": "W006RC1Q027SBEA",      # Federal Gov Tax Receipts (Quarterly)
     "gdp": "GDP",                           # Gross Domestic Product (Quarterly)
+    "gdp_growth": "A191RL1Q225SBEA",        # Real GDP Growth (Quarterly)
     "cpi": "CPIAUCSL",                      # Consumer Price Index (Monthly)
 }
 
