@@ -26,12 +26,20 @@ The dashboard does not just show numbers; it evaluates the **health of the debt 
 4.  **Yield Curve Inversion (Recession Signal):**
       * *Critical:* 3M Yield > 10Y Yield (Inverted - Recession Warning).
 
+### Advanced Indicators (Phase 5+)
+5.  **Market Real Yield & Inflation Expectations:**
+      * Uses 5Y Breakevens (`T5YIE`) to calculate *Market Real Yield* (10Y Nominal - 5Y Breakeven).
+6.  **Term Premium Decomposition:**
+      * Tracks `ACMTP10` to distinguish between Fed rate expectations vs. supply/risk premium. A spike in Term Premium while Fed expectations are flat signals "Fiscal Dominance" panic.
+7.  **Capital Flight Signals (Gold/Bond Ratio):**
+      * Rising Gold prices alongside rising Bond Yields (falling bond prices) indicates a loss of confidence in the currency/sovereign debt.
+
 ## 3. System Architecture
 
 ### Tech Stack
 
   * **Language:** Python 3.10+
-  * **Interface:** `rich` library (for "Bloomberg Terminal" style aesthetics).
+  * **Interface:** `rich` (Phase 1-4) -> `textual` (Phase 5+ for interactive TUI).
   * **Charts:** `plotext` (for rendering time-series charts inside the terminal).
   * **Data Processing:** `duckdb` + `pandas` (High-performance analytics).
   * **Caching:** `Parquet` files (Data Lakehouse architecture).
@@ -50,7 +58,7 @@ The dashboard does not just show numbers; it evaluates the **health of the debt 
 [config.json] --------> (SA Fiscal Data) -------------------/
                                                             |
                                                             v
-                                                   [Rich UI Renderer]
+                                                   [Rich/Textual UI Renderer]
 ```
 
 ## 4. Data Strategy
@@ -63,12 +71,15 @@ We will programmatically fetch all US metrics to ensure real-time accuracy.
       * US 10Y Yield (`^TNX`).
       * US 3M Yield (`^IRX`).
       * S&P 500 (`^GSPC`).
+      * Gold (`GC=F`).
   * **Macro Data (Lagged/Monthly):**
       * Total Public Debt (`GFDEBTN`).
       * Federal Interest Outlays (`A091RC1Q027SBEA`).
       * Federal Tax Receipts (`W006RC1Q027SBEA`).
       * GDP Growth (`GDP`).
       * Net Liquidity Components (Fed Assets, TGA, RRP).
+      * **New:** 5-Year Breakeven Inflation (`T5YIE`).
+      * **New:** 10-Year Term Premium (`ACMTP10`).
 
 ### C. Caching Strategy (DuckDB + Parquet)
 
@@ -80,7 +91,7 @@ To prevent API rate limits and enable offline startup, all fetched data is cache
 
 ## 5. Development Phases
 
-We will build this in 4 distinct phases. Each phase results in a testable milestone.
+We will build this in distinct phases.
 
 ### Phase 1: The "Pulse" (Connectivity Proof)
   * **Goal:** Establish API connections and print raw text data to the console.
@@ -106,7 +117,20 @@ We will build this in 4 distinct phases. Each phase results in a testable milest
   * **Deliverables:**
       * **Net Liquidity Chart:** Dual axis chart tracking "The Plumbing" vs S&P 500.
       * **Status Headers:** Visual warnings for Fiscal Dominance.
+      * **Visceral Metrics:** "Days of Interest" ($ spent on interest per day).
   * **Status:** In Progress.
+
+### Phase 5: Interactive TUI & Deep Analytics (Future)
+  * **Goal:** Upgrade UI to `Textual` for interactivity and implement deep financial modeling.
+  * **Deliverables:**
+      * **Interactive TUI:** Tabs for [US], [SA], [Liquidity], [Forex].
+      * **Drill-down:** Enter key on metrics to see full-screen historical charts.
+      * **Advanced Analytics:**
+          * Market Real Yield (using Breakevens).
+          * Term Premium Decomposition.
+          * "Day Zero" Forecast (Linear Regression on Interest/Revenue ratio).
+      * **News Ticker:** RSS scrolling marquee for context.
+      * **Global Grid:** Multi-country comparison table.
 
 ## 6. Project Directory Structure
 

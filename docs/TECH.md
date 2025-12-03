@@ -4,7 +4,7 @@ This document serves as the **Technical Specification** for "Project Sentinel." 
 
 # Technical Specification: Project Sentinel
 
-**Version:** 2.0 (DuckDB Migration)
+**Version:** 2.1 (Advanced Analytics & Interactive TUI)
 **Type:** CLI Financial Dashboard
 **Target System:** Local Terminal (Python)
 
@@ -37,10 +37,11 @@ graph TD
         C2[Calculator: Interest vs Revenue]
         C3[Alert System: Threshold Checks]
         C4[Analytics: Net Liquidity]
+        C5[Forecasting: Regression Models]
     end
 
     subgraph UI Layer
-        D1[Rich: Layout & Panels]
+        D1[Rich/Textual: Layout & Panels]
         D2[Plotext: Ascii Charts]
         D3[Rich: Live Loop]
     end
@@ -73,12 +74,14 @@ project_sentinel/
   * **Runtime:** Python 3.10+
   * **Core Libraries:**
       * `rich`: For the dashboard UI (Tables, Panels, Layouts).
+      * `textual`: For advanced interactive TUI (Tabs, Scrolling, Input).
       * `plotext`: For rendering time-series charts inside the terminal.
       * `pandas`: For data manipulation and time-series alignment.
       * `duckdb`: High-performance analytical database engine.
       * `pyarrow`: For Parquet file handling.
       * `fredapi`: To fetch US economic data (Official Fed API).
       * `yfinance`: To fetch live bond yields and currency pairs.
+      * `scikit-learn`: For simple linear regression (Doom Loop forecasts).
       * `python-dotenv`: To manage security (API Keys).
 
 ## 4. Data Ingestion Strategy
@@ -123,10 +126,13 @@ CREATE TABLE IF NOT EXISTS chart_metadata (
       * `WALCL`: Fed Total Assets (Net Liquidity)
       * `WTREGEN`: Treasury General Account (Net Liquidity)
       * `RRPONTSYD`: Reverse Repo (Net Liquidity)
+      * `T5YIE`: 5-Year Breakeven Inflation Rate (Market Inflation Expectation)
+      * `ACMTP10`: 10-Year Term Premium
   * **Source:** YFinance
       * `^TNX`: 10-Year Treasury Yield
       * `^IRX`: 3-Month Treasury Yield
       * `^GSPC`: S&P 500
+      * `GC=F`: Gold Futures
 
 ### B. South Africa (Hybrid)
   * **Source:** YFinance (`ZAR=X`)
@@ -152,26 +158,46 @@ $$Spread = \text{10Y Yield} - \text{3M Yield}$$
 $$Net Liquidity = \text{Fed Assets} - \text{TGA} - \text{Reverse Repo}$$
   * *Analysis:* Correlation with S&P 500 over 5 years. High correlation (>0.7) suggests central bank liquidity is driving asset prices.
 
+**5. Market Real Yield**
+$$Real Yield = \text{10Y Nominal Yield} - \text{5Y Breakeven Inflation}$$
+  * *Why:* More accurate than using backward-looking CPI.
+
+**6. "Day Zero" Forecast (Regression)**
+  * **Input:** Historical time-series of `Interest/Revenue` ratio (last 5 years).
+  * **Method:** Linear Regression ($y = mx + c$).
+  * **Target:** Solve for $x$ (date) where $y = 1.0$ (100%).
+  * **Output:** "Estimated date when Interest consumes 100% of Revenue".
+
+**7. Days of Interest**
+$$Daily Cost = \frac{\text{Total Debt} \times \text{Average Interest Rate}}{365}$$
+  * *Or simpler approximation:* `Annual Interest Expense / 365`.
+
 ## 6. UI/UX Specification
 
-The dashboard utilizes `rich.layout` to split the terminal into a grid.
+The dashboard utilizes `rich` (initially) and `textual` (future) for layout.
 
-**Layout Wireframe:**
+**Layout Wireframe (Advanced Mode):**
 
 ```text
 +---------------------------------------------------------------+
 |  HEADER: [Blinking Dot] PROJECT SENTINEL - LIVE MONITOR       |
+|  [Tabs: US | SA | LIQUIDITY | FOREX | GLOBAL GRID]            |
 +------------------------------+--------------------------------+
-|  USA PANEL (The Empire)      |  SA PANEL (Emerging Mkt)       |
-|  Debt/GDP:      123% [RED]   |  USD/ZAR:      18.45 [YEL]     |
-|  Interest/Rev:  18%  [YEL]   |  Interest/Rev: 22%   [RED]     |
-|  ...                         |  ...                           |
+|  USA PANEL (The Empire)      |  ALERTS / NEWS TICKER          |
+|  Debt/GDP:      123% [RED]   |  > Weak 30Y Auction Results    |
+|  Int/Rev:       18%  [YEL]   |  > Fed Chair Powell Speaks     |
+|  Days of Int:   $3.2B/day    |                                |
 +------------------------------+--------------------------------+
-|  MACRO TRENDS & LIQUIDITY PLUMBING                            |
-|  [ US Growth Spread Chart (r-g) ]                             |
+|  MACRO ANALYTICS                                              |
+|  [ Gold vs Bond Yields (Correlation Check) ]                  |
 |  ------------------------------------------------------------ |
 |  [ Net Liquidity vs S&P 500 (Dual Axis) ]                     |
 +------------------------------+--------------------------------+
 |  STATUS BAR:  Checking for Fiscal Dominance...  [OK]          |
 +---------------------------------------------------------------+
 ```
+
+### Improvements
+1.  **News Ticker:** Rolling RSS feed for context.
+2.  **Interactive Tabs:** Switch views without restarting.
+3.  **Global Grid:** Side-by-side comparison of multiple sovereigns.
