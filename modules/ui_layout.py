@@ -14,6 +14,7 @@ from rich.console import Group
 from rich.align import Align
 
 from modules import logic, render_chart
+import config
 
 
 def format_value(value, suffix: str = "", decimals: int = 2) -> str:
@@ -25,17 +26,16 @@ def format_value(value, suffix: str = "", decimals: int = 2) -> str:
     return str(value)
 
 
-def format_ratio_with_status(ratio: float, suffix: str = "%") -> str:
+def format_ratio_with_status(ratio: float, warn: float, crit: float, suffix: str = "%") -> str:
     """Format ratio with color based on status."""
     if ratio is None:
         return "[dim]N/A[/dim]"
     
-    status = logic.get_interest_ratio_status(ratio)
     ratio_pct = ratio * 100
     
-    if status == "CRITICAL":
+    if ratio >= crit:
         return f"[bold red]{ratio_pct:.1f}{suffix}[/bold red] [red]CRITICAL[/red]"
-    elif status == "WARNING":
+    elif ratio >= warn:
         return f"[bold yellow]{ratio_pct:.1f}{suffix}[/bold yellow] [yellow]WARNING[/yellow]"
     return f"[bold green]{ratio_pct:.1f}{suffix}[/bold green] [green]SAFE[/green]"
 
@@ -57,263 +57,192 @@ def create_header(blink_state: bool = True) -> Panel:
     return Panel(grid, style="white", box=box.HEAVY)
 
 
-def create_us_panel(data: dict) -> Panel:
-    """Create the US metrics panel."""
+def create_indicators_panel(country_code: str, data: dict) -> Panel:
+    """Create the standard indicators panel for a country."""
+    country_conf = config.COUNTRIES.get(country_code, {})
+    thresholds = country_conf.get("thresholds", {})
+    currency = country_conf.get("currency_symbol", "")
+    flag = country_conf.get("flag", "")
+    name = country_conf.get("name", country_code)
+    
     table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2), expand=True)
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="white", justify="right")
     
-    # Core Metrics (Aligned with SA)
-    table.add_row("Total Public Debt", format_value(data.get("total_debt"), " B", 0))
-    table.add_row("GDP", format_value(data.get("gdp"), " B", 0))
-    table.add_row("Interest Payments", format_value(data.get("interest_payments"), " B", 1))
-    table.add_row("Tax Receipts", format_value(data.get("tax_receipts"), " B", 1))
-    table.add_row("10Y Treasury Yield", format_value(data.get("yield_10y"), "%", 2))
+    # 1. Core Fiscal Metrics
+    table.add_row("[bold]FISCAL[/bold]", "")
+    table.add_row("Total Public Debt", format_value(data.get("total_debt"), f" B {currency}", 0))
+    table.add_row("Interest Payments", format_value(data.get("interest_payments"), f" B {currency}", 1))
+    table.add_row("Tax Receipts", format_value(data.get("tax_receipts"), f" B {currency}", 1))
+    table.add_row("GDP", format_value(data.get("gdp"), f" B {currency}", 0))
     
-    # Yield Curve (10Y - 3M)
-    yield_10y = data.get("yield_10y")
-    yield_3m = data.get("yield_3m")
-    if yield_10y is not None and yield_3m is not None:
-        spread = logic.calculate_yield_spread(yield_10y, yield_3m)
-        status = logic.get_yield_curve_status(spread)
-        color = "red" if status == "CRITICAL" else "green"
-        table.add_row("Yield Curve (10Y-3M)", f"[bold {color}]{spread:+.2f}%[/bold {color}]")
-    else:
-        table.add_row("Yield Curve (10Y-3M)", "[dim]N/A[/dim]")
-    
-    # Growth Spread (r-g)
-    yield_10y = data.get("yield_10y")
-    gdp_growth = data.get("gdp_growth")
-    if yield_10y is not None and gdp_growth is not None:
-        spread = logic.calculate_growth_spread(yield_10y, gdp_growth)
-        status = logic.get_growth_spread_status(spread)
-        color = "red" if status == "CRITICAL" else "green"
-        table.add_row("Growth Spread (r-g)", f"[bold {color}]{spread:+.1f}%[/bold {color}]")
-    else:
-        table.add_row("Growth Spread (r-g)", "[dim]N/A[/dim]")
-
     # Interest/Revenue Ratio
     if data.get("interest_payments") and data.get("tax_receipts"):
         ratio = logic.calculate_interest_revenue_ratio(
             data["interest_payments"],
             data["tax_receipts"]
         )
-        table.add_row("Interest/Revenue", format_ratio_with_status(ratio))
+        warn = thresholds.get("interest_rev_warning", 0.15)
+        crit = thresholds.get("interest_rev_critical", 0.20)
+        table.add_row("Interest/Revenue", format_ratio_with_status(ratio, warn, crit))
     else:
         table.add_row("Interest/Revenue", "[dim]N/A[/dim]")
-    
+
     # Debt/GDP Ratio
+    debt_gdp = None
     if data.get("total_debt") and data.get("gdp"):
         debt_gdp = logic.calculate_debt_to_gdp_ratio(data["total_debt"], data["gdp"])
+        warn = thresholds.get("debt_gdp_warning", 100.0)
+        crit = thresholds.get("debt_gdp_critical", 120.0)
         
-        # Color code Debt/GDP
-        status = logic.get_debt_gdp_status(debt_gdp, is_emerging_market=False)
-        color = "white"
-        if status == "CRITICAL": color = "red"
-        elif status == "WARNING": color = "yellow"
+        # Color code
+        color = "green"
+        if debt_gdp >= crit: color = "red"
+        elif debt_gdp >= warn: color = "yellow"
         
         table.add_row("Debt/GDP", f"[{color}]{debt_gdp:,.1f}%[/{color}]")
     else:
         table.add_row("Debt/GDP", "[dim]N/A[/dim]")
-        
-    # US Specific Extra: Real Yield
+
+    table.add_row("", "")
+    table.add_row("[bold]MONETARY & ECONOMIC[/bold]", "")
+
+    # Yields & Inflation
+    yield_10y = data.get("yield_10y")
+    table.add_row("10Y Bond Yield", format_value(yield_10y, "%", 2))
+    
     inflation = data.get("inflation_yoy")
+    table.add_row("Inflation (YoY)", format_value(inflation, "%", 2))
+    
+    # Real Yield (r - i)
     if yield_10y is not None and inflation is not None:
         real_yield = logic.calculate_real_yield(yield_10y, inflation)
-        table.add_row("Real Yield (r-i)", format_value(real_yield, "%", 2))
-    
-    # Vigilante Alert
-    if yield_10y and logic.get_bond_vigilante_status(yield_10y):
-        table.add_row("", "")
-        table.add_row("[bold white on red]⚠️ VIGILANTE ATTACK[/bold white on red]", "")
-
-    # Yield Curve Alert
-    if yield_10y is not None and yield_3m is not None:
-        spread = logic.calculate_yield_spread(yield_10y, yield_3m)
-        if logic.get_yield_curve_status(spread) == "CRITICAL":
-            table.add_row("", "")
-            table.add_row("[bold white on red]⚠️ YIELD CURVE INVERTED[/bold white on red]", "")
-
-    # Sparkline
-    sparkline = render_chart.build_sparkline("^TNX", months=6, width=65, height=8)
-    
-    content = Group(
-        table,
-        Text(""),
-        Text("10Y Yield Trend (6mo):", style="dim cyan"),
-        Text.from_ansi(sparkline)
-    )
-    
-    # Border color based on status
-    border_style = "blue"
-    if data.get("interest_payments") and data.get("tax_receipts"):
-        ratio = logic.calculate_interest_revenue_ratio(data["interest_payments"], data["tax_receipts"])
-        if logic.get_interest_ratio_status(ratio) == "CRITICAL":
-            border_style = "red"
-    if yield_10y and logic.get_bond_vigilante_status(yield_10y):
-        border_style = "red"
-    if yield_10y is not None and yield_3m is not None:
-        if logic.get_yield_curve_status(logic.calculate_yield_spread(yield_10y, yield_3m)) == "CRITICAL":
-            border_style = "red"
-    
-    return Panel(
-        content,
-        title="[bold blue]🇺🇸 UNITED STATES (The Empire)[/bold blue]",
-        border_style=border_style
-    )
-
-
-def create_sa_panel(data: dict) -> Panel:
-    """Create the SA metrics panel."""
-    table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2), expand=True)
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="white", justify="right")
-    
-    # Core Metrics (Aligned with US)
-    table.add_row("Total Debt", format_value(data.get("debt_zar_billions"), " B ZAR", 0))
-    table.add_row("GDP", format_value(data.get("gdp_zar_billions"), " B ZAR", 0))
-    table.add_row("Interest Expense", format_value(data.get("annual_interest_expense_zar_billions"), " B ZAR", 0))
-    table.add_row("Annual Revenue", format_value(data.get("annual_revenue_zar_billions"), " B ZAR", 0))
-    table.add_row("10Y Yield (Static)", format_value(data.get("bond_yield_10y_static"), "%", 1))
-    
-    # Growth Spread
-    bond_yield = data.get("bond_yield_10y_static")
-    gdp_growth = data.get("gdp_growth_forecast_pct")
-    if bond_yield and gdp_growth:
-        spread = logic.calculate_growth_spread(bond_yield, gdp_growth)
+        color = "green" if real_yield > 0 else "red"
+        table.add_row("Real Yield (r - i)", f"[{color}]{real_yield:+.2f}%[/{color}]")
+    else:
+         table.add_row("Real Yield (r - i)", "[dim]N/A[/dim]")
+         
+    # Growth Spread (r - g)
+    gdp_growth = data.get("gdp_growth")
+    if yield_10y is not None and gdp_growth is not None:
+        spread = logic.calculate_growth_spread(yield_10y, gdp_growth)
         status = logic.get_growth_spread_status(spread)
         color = "red" if status == "CRITICAL" else "green"
-        table.add_row("Growth Spread (r-g)", f"[bold {color}]{spread:+.1f}%[/bold {color}]")
+        table.add_row("Growth Spread (r - g)", f"[bold {color}]{spread:+.2f}%[/bold {color}]")
     else:
-         table.add_row("Growth Spread (r-g)", "[dim]N/A[/dim]")
-         
-    # Interest/Revenue
-    interest = data.get("annual_interest_expense_zar_billions")
-    revenue = data.get("annual_revenue_zar_billions")
-    if interest and revenue:
-        ratio = logic.calculate_interest_revenue_ratio(interest, revenue)
-        table.add_row("Interest/Revenue", format_ratio_with_status(ratio))
-    else:
-        table.add_row("Interest/Revenue", "[dim]N/A[/dim]")
-    
-    # Debt/GDP
-    rev = data.get("annual_revenue_zar_billions")
-    debt = data.get("debt_zar_billions")
-    gdp = data.get("gdp_zar_billions")
-    
-    if debt:
-        debt_gdp = None
-        label = "Debt/GDP"
+        table.add_row("Growth Spread (r - g)", "[dim]N/A[/dim]")
         
-        if gdp:
-            debt_gdp = logic.calculate_debt_to_gdp_ratio(debt, gdp)
-        elif rev:
-            est_gdp = rev * 4.0 # Estimate GDP as ~4x Revenue
-            debt_gdp = logic.calculate_debt_to_gdp_ratio(debt, est_gdp)
-            label = "Debt/GDP (Est)"
-            
-        if debt_gdp is not None:
-            # Color code
-            status = logic.get_debt_gdp_status(debt_gdp, is_emerging_market=True)
-            color = "white"
-            if status == "CRITICAL": color = "red"
-            elif status == "WARNING": color = "yellow"
-            
-            table.add_row(label, f"[{color}]{debt_gdp:.1f}%[/{color}]")
-        else:
-             table.add_row("Debt/GDP", "[dim]N/A[/dim]")
-    else:
-        table.add_row("Debt/GDP", "[dim]N/A[/dim]")
+    # Currency (if applicable)
+    if "usd_zar" in data and data["usd_zar"]:
+         table.add_row("USD/ZAR", format_value(data["usd_zar"], "", 2))
 
-    # SA Specific Extra: USD/ZAR
-    table.add_row("USD/ZAR (Live)", format_value(data.get("usd_zar"), "", 2))
 
-    # Currency Risk Alert
-    usd_zar = data.get("usd_zar")
-    if usd_zar and logic.get_currency_risk_status(usd_zar):
+    # Alerts Section
+    alerts = []
+    
+    # Vigilante Alert
+    vigilante_thresh = thresholds.get("yield_10y_vigilante")
+    if vigilante_thresh and yield_10y and yield_10y > vigilante_thresh:
+        alerts.append("[bold white on red]⚠️ BOND VIGILANTE ATTACK[/bold white on red]")
+        
+    # Currency Crisis
+    currency_thresh = thresholds.get("currency_risk_critical")
+    if currency_thresh and data.get("usd_zar") and data["usd_zar"] > currency_thresh:
+        alerts.append("[bold white on red]⚠️ CURRENCY CRISIS[/bold white on red]")
+        
+    # Interest Crisis
+    if data.get("interest_payments") and data.get("tax_receipts"):
+        ratio = logic.calculate_interest_revenue_ratio(data["interest_payments"], data["tax_receipts"])
+        crit = thresholds.get("interest_rev_critical", 0.20)
+        if ratio >= crit:
+             alerts.append("[bold white on red]⚠️ DEBT SPIRAL DETECTED[/bold white on red]")
+
+    if alerts:
         table.add_row("", "")
-        table.add_row("[bold white on red]⚠️ CURRENCY CRISIS[/bold white on red]", "")
+        for alert in alerts:
+            table.add_row(alert, "")
 
-    # Sparkline
-    sparkline = render_chart.build_sparkline("ZAR=X", months=6, width=65, height=8)
-    
-    content = Group(
-        table,
-        Text(""),
-        Text("USD/ZAR Trend (6mo):", style="dim cyan"),
-        Text.from_ansi(sparkline)
-    )
-    
-    # Border color based on status
-    border_style = "green"
-    if interest and revenue:
-        ratio = logic.calculate_interest_revenue_ratio(interest, revenue)
-        if logic.get_interest_ratio_status(ratio) == "CRITICAL":
-            border_style = "red"
-    if usd_zar and logic.get_currency_risk_status(usd_zar):
+    # Sparkline (10Y Yield History)
+    sparkline_ticker = country_conf.get("metrics", {}).get("yield_10y")
+    if sparkline_ticker:
+        sparkline = render_chart.build_sparkline(sparkline_ticker, months=6, width=60, height=5)
+        content = Group(
+            table,
+            Text(""),
+            Text("10Y Yield Trend (6mo):", style="dim cyan"),
+            Text.from_ansi(sparkline)
+        )
+    else:
+        content = table
+
+    # Border Color Logic
+    border_style = "blue"
+    if alerts:
         border_style = "red"
 
     return Panel(
         content,
-        title="[bold green]🇿🇦 SOUTH AFRICA (Emerging Mkt)[/bold green]",
+        title=f"[bold]{flag} {name.upper()}[/bold]",
         subtitle=f"[dim]Data: {data.get('last_updated', 'Unknown')}[/dim]",
         border_style=border_style
     )
 
 
-def create_charts_panel() -> Panel:
-    """Create the historical charts panel."""
-    # US Growth Spread Chart (US_GROWTH_SPREAD)
-    # Increased width to 120 for better visibility on wide monitors
-    chart = render_chart.build_full_chart("US_GROWTH_SPREAD", months=6, width=135, height=10)
+def create_charts_panel(country_code: str) -> Group:
+    """Create the historical charts panel (Split Left/Right)."""
     
-    content = Group(
-        Text("US Growth Spread (Yield vs GDP) - 6 Month Trend", style="bold cyan"),
-        Text.from_ansi(chart)
+    # Left: Yield Curve
+    yield_curve_chart = render_chart.build_yield_curve_chart(country_code, width=75, height=15)
+    
+    # Right: Net Liquidity (Global Context)
+    liquidity_chart = render_chart.build_liquidity_chart(width=75, height=15)
+    
+    # We use a Layout object to split them? 
+    # Actually, Rich Panels can contain Layouts? No, Layouts contain Panels.
+    # But this function returns a Panel or Group to be put into a Layout slot.
+    # If I return a Group, they stack vertically.
+    # To split horizontally within this panel, I need to use Columns or Table.
+    
+    grid = Table.grid(expand=True)
+    grid.add_column(ratio=1)
+    grid.add_column(ratio=1)
+    
+    grid.add_row(
+        Panel(Text.from_ansi(yield_curve_chart), title="Yield Curve Structure", border_style="green"),
+        Panel(Text.from_ansi(liquidity_chart), title="Global Liquidity Context", border_style="yellow")
     )
     
-    return Panel(
-        content,
-        title="[bold yellow]MACRO TRENDS[/bold yellow]",
-        border_style="yellow"
-    )
+    return grid
 
 
-def create_footer(us_data: dict, sa_data: dict) -> Panel:
+def create_footer(data: dict, country_code: str) -> Panel:
     """Create the status bar/footer with global alert."""
+    country_conf = config.COUNTRIES.get(country_code, {})
+    thresholds = country_conf.get("thresholds", {})
+    
     is_critical = False
     
-    # Check US Criticals
-    if us_data.get("interest_payments") and us_data.get("tax_receipts"):
-        ratio = logic.calculate_interest_revenue_ratio(us_data["interest_payments"], us_data["tax_receipts"])
-        if logic.get_interest_ratio_status(ratio) == "CRITICAL": is_critical = True
+    # Interest/Revenue Check
+    if data.get("interest_payments") and data.get("tax_receipts"):
+        ratio = logic.calculate_interest_revenue_ratio(data["interest_payments"], data["tax_receipts"])
+        crit = thresholds.get("interest_rev_critical", 0.20)
+        if ratio >= crit: is_critical = True
         
-    if us_data.get("yield_10y") and logic.get_bond_vigilante_status(us_data["yield_10y"]): 
-        is_critical = True
-
-    if us_data.get("total_debt") and us_data.get("gdp"):
-        debt_gdp = logic.calculate_debt_to_gdp_ratio(us_data["total_debt"], us_data["gdp"])
-        if logic.get_debt_gdp_status(debt_gdp, False) == "CRITICAL": is_critical = True
-        
-    # Check SA Criticals
-    if sa_data.get("usd_zar") and logic.get_currency_risk_status(sa_data["usd_zar"]): 
-        is_critical = True
-        
-    sa_int = sa_data.get("annual_interest_expense_zar_billions")
-    sa_rev = sa_data.get("annual_revenue_zar_billions")
-    if sa_int and sa_rev:
-        ratio = logic.calculate_interest_revenue_ratio(sa_int, sa_rev)
-        if logic.get_interest_ratio_status(ratio) == "CRITICAL": is_critical = True
+    # Debt/GDP Check
+    if data.get("total_debt") and data.get("gdp"):
+        debt_gdp = logic.calculate_debt_to_gdp_ratio(data["total_debt"], data["gdp"])
+        crit = thresholds.get("debt_gdp_critical", 120.0)
+        if debt_gdp >= crit: is_critical = True
 
     if is_critical:
         content = "[bold white on red] ALERT: FISCAL DOMINANCE DETECTED - SYSTEM INSTABILITY [/bold white on red]"
     else:
-        content = "[dim]Checking for Fiscal Dominance...[/dim] [bold green]SYSTEM STABLE[/bold green]"
+        content = f"[dim]Monitoring {country_conf.get('name')}...[/dim] [bold green]SYSTEM STABLE[/bold green]"
     
     return Panel(Align.center(content), box=box.MINIMAL, style="dim white")
 
 
-def build_dashboard_layout(us_data: dict, sa_data: dict, blink_state: bool = True) -> Layout:
+def build_dashboard_layout(country_code: str, data: dict, blink_state: bool = True) -> Layout:
     """
     Build the main dashboard layout.
     """
@@ -327,22 +256,18 @@ def build_dashboard_layout(us_data: dict, sa_data: dict, blink_state: bool = Tru
     
     layout["header"].update(create_header(blink_state))
     
-    # Split main into live metrics (top) and historical charts (bottom)
+    # Vertical Split: Top (Indicators), Bottom (Charts)
     layout["main"].split_column(
-        Layout(name="live_metrics", ratio=1),
-        Layout(name="historical_charts", ratio=1)
+        Layout(name="indicators", size=24), 
+        Layout(name="charts", ratio=1)
     )
     
-    layout["live_metrics"].split_row(
-        Layout(name="us_panel", ratio=1),
-        Layout(name="sa_panel", ratio=1)
-    )
+    # Update Indicators
+    layout["indicators"].update(create_indicators_panel(country_code, data))
     
-    layout["us_panel"].update(create_us_panel(us_data))
-    layout["sa_panel"].update(create_sa_panel(sa_data))
+    # Update Charts
+    layout["charts"].update(create_charts_panel(country_code))
     
-    layout["historical_charts"].update(create_charts_panel())
-    
-    layout["footer"].update(create_footer(us_data, sa_data))
+    layout["footer"].update(create_footer(data, country_code))
     
     return layout

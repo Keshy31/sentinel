@@ -8,9 +8,9 @@ Handles all data ingestion:
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 
 import pandas as pd
 import yfinance as yf
@@ -93,35 +93,60 @@ def get_cached_or_fetch(
     return None
 
 
-def get_us_metrics() -> dict:
+def get_country_metrics(country_code: str) -> dict:
     """
-    Fetch all US economic metrics from FRED and YFinance.
+    Fetch standard metrics for a specific country.
     
+    Args:
+        country_code: 'US' or 'SA' (must exist in config.COUNTRIES)
+        
     Returns:
-        Dictionary containing:
-        - total_debt: Total public debt (billions)
-        - interest_payments: Annual interest expense (billions)
-        - tax_receipts: Annual tax revenue (billions)
-        - gdp: Gross Domestic Product (billions)
-        - yield_10y: Current 10Y Treasury yield (%)
-        - last_updated: Timestamp of data fetch
+        Dictionary containing standard metrics:
+        - total_debt
+        - interest_payments
+        - tax_receipts
+        - gdp
+        - gdp_growth
+        - yield_10y
+        - inflation_yoy
+        - last_updated
     """
+    if country_code not in config.COUNTRIES:
+        return {"errors": [f"Unknown country code: {country_code}"]}
+        
+    country_config = config.COUNTRIES[country_code]
+    source_type = country_config.get("source_type")
+    
+    # Initialize result with standard keys
     result = {
         "total_debt": None,
         "interest_payments": None,
         "tax_receipts": None,
         "gdp": None,
-        "yield_10y": None,
-        "yield_3m": None,
         "gdp_growth": None,
+        "yield_10y": None,
         "inflation_yoy": None,
+        "currency_symbol": country_config.get("currency_symbol", ""),
         "last_updated": datetime.now().isoformat(),
         "errors": []
     }
     
-    fred = get_fred_client()
+    if source_type == "FRED_API":
+        _fetch_fred_metrics(country_config, result)
+    elif source_type == "MANUAL_JSON":
+        _fetch_json_metrics(country_config, result)
+        
+    # Always try to fetch live market data (Yields/FX) if configured
+    _fetch_live_market_data(country_config, result)
     
-    # Helper to fetch specific FRED series
+    return result
+
+
+def _fetch_fred_metrics(country_config: dict, result: dict):
+    """Fetch metrics from FRED API."""
+    fred = get_fred_client()
+    metrics_map = country_config.get("metrics", {})
+    
     def fetch_fred_series(series_id):
         if not fred:
             raise Exception("FRED API key missing")
@@ -134,13 +159,9 @@ def get_us_metrics() -> dict:
             return val
         return None
 
-    # Helper to calculate Inflation YoY
-    def fetch_inflation_yoy():
-        if not fred:
-            return None
-        # Fetch full series to ensure we have enough history
-        # (FRED API is fast enough to fetch all, or we could limit by date, but simple is robust)
-        series = fred.get_series(config.FRED_SERIES["cpi"])
+    def fetch_inflation_yoy(series_id):
+        if not fred: return None
+        series = fred.get_series(series_id)
         if series is not None and len(series) >= 13:
             series = series.dropna()
             current = series.iloc[-1]
@@ -148,12 +169,24 @@ def get_us_metrics() -> dict:
             return ((current - year_ago) / year_ago) * 100
         return None
 
-    # Process FRED metrics
-    for key, series_id in config.FRED_SERIES.items():
-        if key == "cpi": continue # Handled separately via inflation calculation
+    for key, series_id in metrics_map.items():
+        # Skip market data tickers (start with ^ or look like tickers)
+        if key == "yield_10y" or key == "usd_zar": continue 
         
+        # Special handling for inflation
+        if key == "inflation_yoy":
+             val = get_cached_or_fetch(
+                key=f"{series_id}_yoy", # Unique cache key
+                fetch_func=lambda s=series_id: fetch_inflation_yoy(s),
+                expiry_seconds=config.CACHE_EXPIRY_MACRO,
+                source_name=f"FRED ({series_id}) YoY",
+                errors_list=result["errors"]
+            )
+             result[key] = val
+             continue
+
         val = get_cached_or_fetch(
-            key=key,
+            key=series_id,
             fetch_func=lambda s=series_id: fetch_fred_series(s),
             expiry_seconds=config.CACHE_EXPIRY_MACRO,
             source_name=f"FRED ({series_id})",
@@ -161,168 +194,111 @@ def get_us_metrics() -> dict:
         )
         result[key] = val
 
-    # Process Inflation
-    result["inflation_yoy"] = get_cached_or_fetch(
-        key="inflation_yoy",
-        fetch_func=fetch_inflation_yoy,
-        expiry_seconds=config.CACHE_EXPIRY_MACRO,
-        source_name="FRED (CPIAUCSL)",
-        errors_list=result["errors"]
-    )
 
-    # Process US 10Y Yield
-    def fetch_us_10y():
-        ticker = yf.Ticker(config.YFINANCE_TICKERS["us_10y_yield"])
-        hist = ticker.history(period="1d")
-        if not hist.empty:
-            return float(hist["Close"].iloc[-1])
-        return None
-
-    result["yield_10y"] = get_cached_or_fetch(
-        key="us_10y_yield",
-        fetch_func=fetch_us_10y,
-        expiry_seconds=config.CACHE_EXPIRY_MARKET,
-        source_name="YFinance ^TNX",
-        errors_list=result["errors"]
-    )
-
-    # Process US 3M Yield (^IRX)
-    def fetch_us_3m():
-        ticker = yf.Ticker(config.YFINANCE_TICKERS["us_3m_yield"])
-        hist = ticker.history(period="1d")
-        if not hist.empty:
-            return float(hist["Close"].iloc[-1])
-        return None
-
-    result["yield_3m"] = get_cached_or_fetch(
-        key="us_3m_yield",
-        fetch_func=fetch_us_3m,
-        expiry_seconds=config.CACHE_EXPIRY_MARKET,
-        source_name="YFinance ^IRX",
-        errors_list=result["errors"]
-    )
+def _fetch_json_metrics(country_config: dict, result: dict):
+    """Fetch metrics from local JSON file."""
+    json_path = config.PROJECT_ROOT / "data" / country_config.get("json_path", "")
+    mapping = country_config.get("json_keys", {})
     
-    return result
-
-
-def get_sa_metrics() -> dict:
-    """
-    Load South African metrics from JSON file and live USD/ZAR rate.
-    
-    Returns:
-        Dictionary containing metrics.
-    """
-    result = {
-        "debt_zar_billions": None,
-        "annual_revenue_zar_billions": None,
-        "annual_interest_expense_zar_billions": None,
-        "gdp_zar_billions": None,
-        "gdp_growth_forecast_pct": None,
-        "bond_yield_10y_static": None,
-        "usd_zar": None,
-        "last_updated": None,
-        "errors": []
-    }
-    
-    # Load JSON fiscal data (No caching needed for local file really, but structure implies it's static)
-    json_path = config.SA_FISCAL_JSON_PATH
     if json_path.exists():
         try:
             with open(json_path, "r") as f:
                 data = json.load(f)
             
-            result["debt_zar_billions"] = data.get("debt_zar_billions")
-            result["annual_revenue_zar_billions"] = data.get("annual_revenue_zar_billions")
-            result["annual_interest_expense_zar_billions"] = data.get("annual_interest_expense_zar_billions")
-            result["gdp_zar_billions"] = data.get("gdp_zar_billions")
-            result["gdp_growth_forecast_pct"] = data.get("gdp_growth_forecast_pct")
-            result["bond_yield_10y_static"] = data.get("bond_yield_10y_static")
-            result["last_updated"] = data.get("last_updated")
+            # Map JSON keys to standard result keys
+            for std_key, json_key in mapping.items():
+                if json_key in data:
+                    result[std_key] = data[json_key]
+                    
+            if "last_updated" in data:
+                result["last_updated"] = data["last_updated"]
+                
         except Exception as e:
             result["errors"].append(f"JSON load error: {str(e)}")
     else:
-        result["errors"].append(f"SA fiscal JSON not found at {json_path}")
+        result["errors"].append(f"JSON file not found: {json_path}")
+
+
+def _fetch_live_market_data(country_config: dict, result: dict):
+    """Fetch live market data (Yields, FX) from YFinance."""
+    metrics_map = country_config.get("metrics", {})
     
-    # Fetch live USD/ZAR from YFinance (Cached)
-    def fetch_usd_zar():
-        ticker = yf.Ticker(config.YFINANCE_TICKERS["usd_zar"])
-        hist = ticker.history(period="1d")
+    def fetch_ticker(ticker):
+        t = yf.Ticker(ticker)
+        hist = t.history(period="1d")
         if not hist.empty:
             return float(hist["Close"].iloc[-1])
         return None
 
-    result["usd_zar"] = get_cached_or_fetch(
-        key="usd_zar",
-        fetch_func=fetch_usd_zar,
-        expiry_seconds=config.CACHE_EXPIRY_MARKET,
-        source_name="YFinance ZAR=X",
-        errors_list=result["errors"]
-    )
-    
-    return result
+    # Check for yield_10y
+    if "yield_10y" in metrics_map:
+        ticker = metrics_map["yield_10y"]
+        # Only fetch if it looks like a ticker (not a FRED ID) or we want to force it
+        # For SA, it's ZAR=X, for US it's ^TNX
+        if ticker:
+             val = get_cached_or_fetch(
+                key=ticker,
+                fetch_func=lambda t=ticker: fetch_ticker(t),
+                expiry_seconds=config.CACHE_EXPIRY_MARKET,
+                source_name=f"YFinance {ticker}",
+                errors_list=result["errors"]
+            )
+             # Prefer live data over static JSON if available
+             if val is not None:
+                 result["yield_10y"] = val
+
+    # Check for usd_zar or other FX
+    if "usd_zar" in metrics_map:
+        ticker = metrics_map["usd_zar"]
+        val = get_cached_or_fetch(
+            key=ticker,
+            fetch_func=lambda t=ticker: fetch_ticker(t),
+            expiry_seconds=config.CACHE_EXPIRY_MARKET,
+            source_name=f"YFinance {ticker}",
+            errors_list=result["errors"]
+        )
+        result["usd_zar"] = val
 
 
-def get_live_market_data() -> dict:
+def get_yield_curve_data(country_code: str) -> Optional[Dict[str, float]]:
     """
-    Fetch only the live market data (yields and FX rates).
+    Fetch current yield curve data.
+    
+    Returns:
+        Dict mapping maturity label (e.g. '10Y') to yield value (float).
     """
-    result = {
-        "us_10y_yield": None,
-        "us_3m_yield": None,
-        "usd_zar": None,
-        "timestamp": datetime.now().isoformat(),
-        "errors": []
-    }
+    if country_code not in config.COUNTRIES:
+        return None
+        
+    curve_config = config.COUNTRIES[country_code].get("yield_curve", {})
+    if not curve_config:
+        return None
+        
+    result = {}
     
-    # Fetch US 10Y Yield
-    def fetch_us_10y():
-        ticker = yf.Ticker(config.YFINANCE_TICKERS["us_10y_yield"])
-        hist = ticker.history(period="1d")
-        if not hist.empty:
-            return float(hist["Close"].iloc[-1])
+    def fetch_ticker(ticker):
+        try:
+            t = yf.Ticker(ticker)
+            hist = t.history(period="1d")
+            if not hist.empty:
+                return float(hist["Close"].iloc[-1])
+        except:
+            pass
         return None
 
-    result["us_10y_yield"] = get_cached_or_fetch(
-        key="us_10y_yield",
-        fetch_func=fetch_us_10y,
-        expiry_seconds=config.CACHE_EXPIRY_MARKET,
-        source_name="YFinance ^TNX",
-        errors_list=result["errors"]
-    )
-
-    # Fetch US 3M Yield
-    def fetch_us_3m():
-        ticker = yf.Ticker(config.YFINANCE_TICKERS["us_3m_yield"])
-        hist = ticker.history(period="1d")
-        if not hist.empty:
-            return float(hist["Close"].iloc[-1])
-        return None
-
-    result["us_3m_yield"] = get_cached_or_fetch(
-        key="us_3m_yield",
-        fetch_func=fetch_us_3m,
-        expiry_seconds=config.CACHE_EXPIRY_MARKET,
-        source_name="YFinance ^IRX",
-        errors_list=result["errors"]
-    )
-    
-    # Fetch USD/ZAR
-    def fetch_usd_zar():
-        ticker = yf.Ticker(config.YFINANCE_TICKERS["usd_zar"])
-        hist = ticker.history(period="1d")
-        if not hist.empty:
-            return float(hist["Close"].iloc[-1])
-        return None
-
-    result["usd_zar"] = get_cached_or_fetch(
-        key="usd_zar",
-        fetch_func=fetch_usd_zar,
-        expiry_seconds=config.CACHE_EXPIRY_MARKET,
-        source_name="YFinance ZAR=X",
-        errors_list=result["errors"]
-    )
-    
-    return result
+    for label, ticker in curve_config.items():
+        # Short expiry cache for yields
+        val = get_cached_or_fetch(
+            key=f"yield_{ticker}",
+            fetch_func=lambda t=ticker: fetch_ticker(t),
+            expiry_seconds=config.CACHE_EXPIRY_MARKET,
+            source_name=f"Yield {label}",
+            errors_list=[]
+        )
+        if val is not None:
+            result[label] = val
+            
+    return result if result else None
 
 
 def get_historical_data(ticker_symbol: str, period: str = "6mo") -> Optional[pd.DataFrame]:
@@ -342,29 +318,6 @@ def get_historical_data(ticker_symbol: str, period: str = "6mo") -> Optional[pd.
     if cached and is_fresh(cached['timestamp'], config.CACHE_EXPIRY_MARKET):
         return cached['data']
 
-    # Special handling for US Growth Spread
-    if ticker_symbol == "US_GROWTH_SPREAD":
-        try:
-            # Fetch US 10Y Yield History
-            ticker = yf.Ticker(config.YFINANCE_TICKERS["us_10y_yield"])
-            hist = ticker.history(period=period)
-            
-            # Fetch latest GDP Growth (use static scalar for this 6mo view)
-            # In a full production app, we would resample quarterly GDP to daily
-            gdp_growth_entry = db.get_metric("gdp_growth")
-            gdp_growth = gdp_growth_entry['value'] if gdp_growth_entry else 2.0 # Fallback default
-            
-            if not hist.empty:
-                # Calculate Spread: Yield - GDP Growth
-                hist["Close"] = hist["Close"] - gdp_growth
-                df = hist[["Close"]]
-                db.set_chart(ticker_symbol, df)
-                return df
-            return None
-        except Exception as e:
-            print(f"Error calculating US Growth Spread: {e}")
-            return None
-        
     try:
         ticker = yf.Ticker(ticker_symbol)
         hist = ticker.history(period=period)
@@ -378,4 +331,128 @@ def get_historical_data(ticker_symbol: str, period: str = "6mo") -> Optional[pd.
         # Return stale if available
         if cached:
             return cached['data']
+        return None
+
+def fetch_net_liquidity_components(years: int = 5) -> bool:
+    """
+    Fetch and cache the components for Net Liquidity.
+    """
+    fred = get_fred_client()
+    if not fred: return False
+    
+    # Define time range
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=years*365)
+    
+    try:
+        # 1. Fetch FRED Series (Global/US Liquidity)
+        for key in ["fed_assets", "tga", "reverse_repo"]:
+            series_id = config.GLOBAL_SERIES[key]
+            # Fetch from FRED
+            series = fred.get_series(series_id, observation_start=start_date, observation_end=end_date)
+            
+            if series is not None and not series.empty:
+                # Convert to DataFrame
+                df = series.to_frame(name="Value")
+                df.index.name = "Date"
+                
+                # Use series ID as cache key (consistent with usage in SQL)
+                db.set_chart(series_id, df)
+            else:
+                print(f"Warning: Empty data for {series_id}")
+                return False
+
+        # 2. Fetch S&P 500
+        sp500_ticker = config.GLOBAL_SERIES["sp500"]
+        sp500 = yf.Ticker(sp500_ticker)
+        # Fetch history (YFinance accepts string for start/end)
+        sp500_hist = sp500.history(start=start_date.strftime("%Y-%m-%d"), end=end_date.strftime("%Y-%m-%d"))
+        
+        if not sp500_hist.empty:
+            df_sp = sp500_hist[["Close"]]
+            df_sp.index.name = "Date" # Ensure index name is set
+            db.set_chart(sp500_ticker, df_sp)
+        else:
+             print(f"Warning: Empty data for {sp500_ticker}")
+             return False
+             
+        return True
+        
+    except Exception as e:
+        print(f"Error fetching net liquidity components: {e}")
+        return False
+
+def get_net_liquidity_data() -> Optional[pd.DataFrame]:
+    """
+    Calculate Net Liquidity and join with S&P 500 using DuckDB.
+    
+    Formula: Net Liquidity = WALCL - WTREGEN - RRPONTSYD
+    
+    Returns:
+        DataFrame with index 'Date' and columns ['Net_Liquidity', 'SP500']
+    """
+    # 1. Ensure Cache is Populated
+    test_key = config.GLOBAL_SERIES["fed_assets"]
+    cached = db.get_chart(test_key)
+    
+    # If missing or old (>24h), fetch fresh
+    if not cached or not is_fresh(cached['timestamp'], config.CACHE_EXPIRY_MACRO):
+        print("Refreshing Net Liquidity Data...")
+        success = fetch_net_liquidity_components()
+        if not success and not cached:
+            return None
+            
+    # 2. Execute DuckDB Query
+    conn = db.get_duckdb_connection()
+    
+    # Construct paths to parquet files
+    def get_path(ticker):
+        safe_ticker = ticker.replace("^", "").replace("=", "").replace("/", "_")
+        return str(config.DATA_DIR / "cache" / f"{safe_ticker}.parquet")
+    
+    path_walcl = get_path(config.GLOBAL_SERIES["fed_assets"])
+    path_tga = get_path(config.GLOBAL_SERIES["tga"])
+    path_rrp = get_path(config.GLOBAL_SERIES["reverse_repo"])
+    path_sp500 = get_path(config.GLOBAL_SERIES["sp500"])
+    
+    query = f"""
+        WITH 
+        fed AS (SELECT CAST(Date AS DATE) as d, Value as val FROM read_parquet('{path_walcl}')),
+        tga AS (SELECT CAST(Date AS DATE) as d, Value as val FROM read_parquet('{path_tga}')),
+        rrp AS (SELECT CAST(Date AS DATE) as d, Value as val FROM read_parquet('{path_rrp}')),
+        sp  AS (SELECT CAST(Date AS DATE) as d, Close as val FROM read_parquet('{path_sp500}')),
+        
+        aligned AS (
+            SELECT 
+                sp.d as Date,
+                sp.val as SP500,
+                (SELECT val FROM fed WHERE d <= sp.d ORDER BY d DESC LIMIT 1) as walcl,
+                (SELECT val FROM tga WHERE d <= sp.d ORDER BY d DESC LIMIT 1) as tga_val,
+                (SELECT val FROM rrp WHERE d <= sp.d ORDER BY d DESC LIMIT 1) as rrp_val
+            FROM sp
+        )
+        SELECT
+            Date,
+            SP500,
+            -- WALCL (M) / 1000 = B
+            -- WTREGEN (M) / 1000 = B
+            -- RRPONTSYD (B)
+            ((walcl / 1000.0) - (tga_val / 1000.0) - rrp_val) as Net_Liquidity
+        FROM aligned
+        WHERE walcl IS NOT NULL AND tga_val IS NOT NULL AND rrp_val IS NOT NULL
+        ORDER BY Date ASC
+    """
+    
+    try:
+        df_result = conn.execute(query).df()
+        conn.close()
+        
+        if not df_result.empty:
+            df_result.set_index('Date', inplace=True)
+            return df_result
+        return None
+        
+    except Exception as e:
+        print(f"DuckDB Query Error: {e}")
+        conn.close()
         return None

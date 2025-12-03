@@ -12,7 +12,7 @@ It visualizes the "Druckenmiller Thesis"—comparing government borrowing costs 
 
 ## 2. Theoretical Framework
 
-The dashboard does not just show numbers; it evaluates the **health of the debt cycle** based on three triggers:
+The dashboard does not just show numbers; it evaluates the **health of the debt cycle** based on four triggers:
 
 1.  **The Growth Gap ($r - g$):**
       * *Safe:* GDP Growth ($g$) > Bond Yield ($r$).
@@ -20,11 +20,10 @@ The dashboard does not just show numbers; it evaluates the **health of the debt 
 2.  **The Tax Squeeze (Interest vs. Revenue):**
       * *Safe:* Interest payments consume < 10% of tax revenue.
       * *Critical:* Interest payments consume > 20% of tax revenue (The "Doom Loop" Threshold).
-3.  **Market Confidence:**
-      * Rising Long-Term Yields (Bond Vigilantes revolting).
-      * Currency devaluation (Loss of trust).
+3.  **Net Liquidity ("The Plumbing"):**
+      * Tracks how Central Bank balance sheet mechanics (Fed Assets - TGA - RRP) drive asset prices (S&P 500).
+      * High correlation implies market dependency on liquidity injection rather than fundamentals.
 4.  **Yield Curve Inversion (Recession Signal):**
-      * *Safe:* 10Y Yield > 3M Yield (Positive slope).
       * *Critical:* 3M Yield > 10Y Yield (Inverted - Recession Warning).
 
 ## 3. System Architecture
@@ -34,8 +33,8 @@ The dashboard does not just show numbers; it evaluates the **health of the debt 
   * **Language:** Python 3.10+
   * **Interface:** `rich` library (for "Bloomberg Terminal" style aesthetics).
   * **Charts:** `plotext` (for rendering time-series charts inside the terminal).
-  * **Data Processing:** `pandas`.
-  * **Caching:** `sqlite3` (Standard Library) for offline capabilities and rate-limit handling.
+  * **Data Processing:** `duckdb` + `pandas` (High-performance analytics).
+  * **Caching:** `Parquet` files (Data Lakehouse architecture).
   * **Live Market Data:** `yfinance` (Yahoo Finance API).
   * **US Macro Data:** `fredapi` (Federal Reserve Economic Data).
   * **Configuration:** `JSON` (for manual entry of South African fiscal data).
@@ -45,12 +44,13 @@ The dashboard does not just show numbers; it evaluates the **health of the debt 
 
 ```text
 [Yahoo Finance API] --> (Live Yields/FX) -----\
-                                              |--> [Data Processing Engine] <--> [SQLite Cache]
-[FRED API] -----------> (US Debt/GDP/Tax) ----/             |                    (Persistence)
+                                              |--> [DuckDB Analytics Engine] <--> [Parquet Cache]
+[FRED API] -----------> (US Macro Data) ------/             |
                                                             |
-[config.json] --------> (SA Fiscal Data) -------------------/                         |
-                                                                                      v
-                                                                             [Rich UI Renderer]
+[config.json] --------> (SA Fiscal Data) -------------------/
+                                                            |
+                                                            v
+                                                   [Rich UI Renderer]
 ```
 
 ## 4. Data Strategy
@@ -62,71 +62,51 @@ We will programmatically fetch all US metrics to ensure real-time accuracy.
   * **Market Data (Live):** 
       * US 10Y Yield (`^TNX`).
       * US 3M Yield (`^IRX`).
+      * S&P 500 (`^GSPC`).
   * **Macro Data (Lagged/Monthly):**
       * Total Public Debt (`GFDEBTN`).
       * Federal Interest Outlays (`A091RC1Q027SBEA`).
       * Federal Tax Receipts (`W006RC1Q027SBEA`).
       * GDP Growth (`GDP`).
+      * Net Liquidity Components (Fed Assets, TGA, RRP).
 
-### C. Caching Strategy (SQLite)
+### C. Caching Strategy (DuckDB + Parquet)
 
-To prevent API rate limits and enable offline startup, all fetched data is cached in a local `sentinel.db`.
+To prevent API rate limits and enable offline startup, all fetched data is cached locally.
 
   * **Macro Data:** Cached for 24 hours.
   * **Market Data:** Cached for 15 minutes.
-  * **Fallback:** If API fails, display last known good value from DB with a "STALE" warning.
+  * **Fallback:** If API fails, display last known good value from DB.
 
 ## 5. Development Phases
 
 We will build this in 4 distinct phases. Each phase results in a testable milestone.
 
 ### Phase 1: The "Pulse" (Connectivity Proof)
-
   * **Goal:** Establish API connections and print raw text data to the console.
-  * **Deliverables:**
-      * Script connecting to Yahoo Finance to fetch US 10Y and USD/ZAR.
-      * Script connecting to FRED to fetch US Debt.
-      * Basic `print()` output confirming data retrieval.
-  * **Test:** Run script $\rightarrow$ See current interest rates and debt numbers.
+  * **Status:** Completed.
 
 ### Phase 2: The Logic Engine & Hybrid Integration
-
-  * **Goal:** Implement the "Dalio Math", the Manual Data Loader, and **SQLite Caching**.
+  * **Goal:** Implement the "Dalio Math", the Manual Data Loader, and **DuckDB Caching**.
   * **Deliverables:**
-      * **Calculation Module:**
-          * Compute US Interest/Revenue Ratio.
-          * Compute US ($r - g$).
-      * **Persistence Layer:**
-          * Implement `DatabaseManager` class using `sqlite3`.
-          * Create tables for `metrics` and `historical_charts`.
-      * **Config Loader:** Create the Python function to read `sa_fiscal.json`.
-      * **SA Calculation:** Compute SA Interest/Revenue using the JSON data.
-  * **Test:**
-      * Change a number in `sa_fiscal.json` $\rightarrow$ Run script $\rightarrow$ See the calculated ratio change.
-      * Disconnect Internet $\rightarrow$ Run script $\rightarrow$ Verify data loads from Cache.
+      * **Persistence Layer:** DuckDB + Parquet.
+      * **Calculation Module:** US/SA Doom Loop Ratios.
+  * **Status:** Completed.
 
 ### Phase 3: The Dashboard (UI Implementation)
-
-  * **Goal:** Replace text printouts with the `rich` TUI (Text User Interface).
+  * **Goal:** Replace text printouts with the `rich` TUI.
   * **Deliverables:**
-      * **Layout Design:** Split screen (US Left / SA Right).
-      * **Live Ticker:** Implement the `Live()` refresh loop (updating every 60s).
-      * **Visual Styling:**
-          * Green text for "Safe".
-          * Red text/background for "Critical".
-          * Blinking indicators for live updates.
-  * **Test:** The dashboard runs continuously in the terminal without crashing.
+      * Split screen layout (US/SA).
+      * Live Ticker.
+      * Visual Styling (Red/Green indicators).
+  * **Status:** Completed.
 
-### Phase 4: The "Doom Loop" Indicators
-
-  * **Goal:** Add the "Interpretation Layer."
+### Phase 4: The "Doom Loop" Indicators & Advanced Analytics
+  * **Goal:** Add the "Interpretation Layer" and "Net Liquidity" analysis.
   * **Deliverables:**
-      * Add status headers (e.g., "STATUS: FISCAL DOMINANCE").
-      * Logic:
-          * IF `US Interest/Rev > 18%` $\rightarrow$ Display Warning.
-          * IF `US 10Y > 5%` $\rightarrow$ Display "VIGILANTE ATTACK".
-          * IF `10Y - 3M < 0` $\rightarrow$ Display "YIELD CURVE INVERTED".
-  * **Test:** Verify that threshold logic correctly triggers the visual warnings.
+      * **Net Liquidity Chart:** Dual axis chart tracking "The Plumbing" vs S&P 500.
+      * **Status Headers:** Visual warnings for Fiscal Dominance.
+  * **Status:** In Progress.
 
 ## 6. Project Directory Structure
 
@@ -136,10 +116,12 @@ project_sentinel/
 ├── config.py             # Constants (Thresholds, File Paths)
 ├── main.py               # Entry point (Run Loop)
 ├── data/
+│   ├── cache/            # Parquet files
 │   └── sa_fiscal.json    # Manual input file for SA Budget data
 ├── modules/
 │   ├── __init__.py
 │   ├── data_loader.py    # Handles FRED, YFinance, and JSON loading
+│   ├── db_manager.py     # DuckDB and Parquet interactions
 │   ├── logic.py          # Pure functions for financial math
 │   ├── render_chart.py   # Plotext charting functions
 │   └── ui_layout.py      # Rich panels and table composition

@@ -1,148 +1,156 @@
 """
-Project Sentinel - Database Manager
+Project Sentinel - Database Manager (DuckDB Version)
 
-Handles SQLite interactions for caching macroeconomic and market data.
+Handles DuckDB interactions for caching macroeconomic and market data.
+- Metrics are stored in a DuckDB table.
+- Time-series charts are stored as Parquet files for high performance.
 """
 
-import sqlite3
-import json
-from io import StringIO
-from datetime import datetime
-from typing import Optional, Any, Dict, Tuple
-from pathlib import Path
+import duckdb
 import pandas as pd
-
+from datetime import datetime
+from typing import Optional, Any, Dict
+from pathlib import Path
 import config
 
 class DatabaseManager:
-    def __init__(self, db_path: Path = config.DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: Path = None):
+        # If no path provided, use the one from config, but change extension to .duckdb
+        if db_path is None:
+            self.db_path = config.DB_PATH.with_suffix('.duckdb')
+        else:
+            self.db_path = db_path
+            
+        self.cache_dir = config.DATA_DIR / "cache"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def _get_connection(self) -> sqlite3.Connection:
+    def _get_connection(self) -> duckdb.DuckDBPyConnection:
         """Create a database connection."""
-        return sqlite3.connect(self.db_path)
+        return duckdb.connect(str(self.db_path))
 
     def init_db(self) -> None:
         """Initialize the database tables."""
         conn = self._get_connection()
-        cursor = conn.cursor()
         
-        # Table for single value metrics (e.g., GDP, Yield)
-        cursor.execute("""
+        # Table for single value metrics
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS metric_cache (
-                key TEXT PRIMARY KEY,
-                value REAL,
-                timestamp DATETIME,
-                source TEXT
+                key VARCHAR PRIMARY KEY,
+                value DOUBLE,
+                timestamp TIMESTAMP,
+                source VARCHAR
             )
         """)
         
-        # Table for chart data (serialized JSON)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS chart_cache (
-                ticker TEXT PRIMARY KEY,
-                data_json TEXT,
-                timestamp DATETIME
+        # Table to track chart timestamps (data lives in Parquet)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chart_metadata (
+                ticker VARCHAR PRIMARY KEY,
+                timestamp TIMESTAMP
             )
         """)
         
-        conn.commit()
         conn.close()
 
     def set_metric(self, key: str, value: float, source: str) -> None:
         """Store a metric value with current timestamp."""
         conn = self._get_connection()
-        cursor = conn.cursor()
+        timestamp = datetime.now()
         
-        cursor.execute("""
+        # Upsert logic
+        conn.execute("""
             INSERT OR REPLACE INTO metric_cache (key, value, timestamp, source)
             VALUES (?, ?, ?, ?)
-        """, (key, value, datetime.now().isoformat(), source))
+        """, (key, value, timestamp, source))
         
-        conn.commit()
         conn.close()
 
     def get_metric(self, key: str) -> Optional[Dict[str, Any]]:
-        """
-        Retrieve a metric from cache.
-        
-        Returns:
-            Dict with 'value', 'timestamp', 'source' or None if not found.
-        """
+        """Retrieve a metric from cache."""
         conn = self._get_connection()
-        cursor = conn.cursor()
         
-        cursor.execute("SELECT value, timestamp, source FROM metric_cache WHERE key = ?", (key,))
-        row = cursor.fetchone()
+        result = conn.execute(
+            "SELECT value, timestamp, source FROM metric_cache WHERE key = ?", 
+            (key,)
+        ).fetchone()
         
         conn.close()
         
-        if row:
+        if result:
             return {
-                "value": row[0],
-                "timestamp": row[1],
-                "source": row[2]
+                "value": result[0],
+                "timestamp": result[1].isoformat() if hasattr(result[1], 'isoformat') else str(result[1]),
+                "source": result[2]
             }
         return None
 
     def set_chart(self, ticker: str, df: pd.DataFrame) -> None:
-        """Store chart data (DataFrame) as JSON."""
-        # Reset index to make Date a column, so it serializes nicely
-        df_reset = df.reset_index()
-        # Convert date to string to ensure JSON serialization works
-        if 'Date' in df_reset.columns:
-             df_reset['Date'] = df_reset['Date'].astype(str)
-             
-        data_json = df_reset.to_json(orient="records")
+        """Store chart data as Parquet and update metadata."""
+        # Sanitize ticker for filename
+        safe_ticker = ticker.replace("^", "").replace("=", "").replace("/", "_")
+        file_path = self.cache_dir / f"{safe_ticker}.parquet"
         
+        # Ensure index is saved as a column for SQL querying
+        # If index has a name (e.g. "Date"), reset_index will make it a column
+        df_to_save = df.copy()
+        if df_to_save.index.name == "Date":
+            df_to_save = df_to_save.reset_index()
+        
+        # Save to Parquet
+        df_to_save.to_parquet(file_path)
+        
+        # Update metadata
         conn = self._get_connection()
-        cursor = conn.cursor()
+        timestamp = datetime.now()
         
-        cursor.execute("""
-            INSERT OR REPLACE INTO chart_cache (ticker, data_json, timestamp)
-            VALUES (?, ?, ?)
-        """, (ticker, data_json, datetime.now().isoformat()))
+        conn.execute("""
+            INSERT OR REPLACE INTO chart_metadata (ticker, timestamp)
+            VALUES (?, ?)
+        """, (ticker, timestamp))
         
-        conn.commit()
         conn.close()
 
     def get_chart(self, ticker: str) -> Optional[Dict[str, Any]]:
-        """
-        Retrieve chart data from cache.
-        
-        Returns:
-            Dict with 'data' (DataFrame) and 'timestamp', or None if not found.
-        """
+        """Retrieve chart data from Parquet cache."""
         conn = self._get_connection()
-        cursor = conn.cursor()
         
-        cursor.execute("SELECT data_json, timestamp FROM chart_cache WHERE ticker = ?", (ticker,))
-        row = cursor.fetchone()
+        # Check metadata first
+        meta = conn.execute(
+            "SELECT timestamp FROM chart_metadata WHERE ticker = ?", 
+            (ticker,)
+        ).fetchone()
         
         conn.close()
         
-        if row:
-            try:
-                data_json = row[0]
-                timestamp = row[1]
-                
-                # Deserialize JSON back to DataFrame
-                df = pd.read_json(StringIO(data_json), orient="records")
-                
-                # Ensure we have a DatetimeIndex if Date column exists
-                if 'Date' in df.columns:
-                    df['Date'] = pd.to_datetime(df['Date'], utc=True)
-                    df.set_index('Date', inplace=True)
-                
-                return {
-                    "data": df,
-                    "timestamp": timestamp
-                }
-            except Exception as e:
-                print(f"Error deserializing chart cache for {ticker}: {e}")
-                return None
-                
-        return None
+        if not meta:
+            return None
+            
+        timestamp = meta[0]
+        safe_ticker = ticker.replace("^", "").replace("=", "").replace("/", "_")
+        file_path = self.cache_dir / f"{safe_ticker}.parquet"
+        
+        if not file_path.exists():
+            return None
+            
+        try:
+            # Read Parquet
+            df = pd.read_parquet(file_path)
+            
+            # Restore index if Date column exists (compatibility with rest of app)
+            if "Date" in df.columns:
+                df = df.set_index("Date")
+            
+            return {
+                "data": df,
+                "timestamp": timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
+            }
+        except Exception as e:
+            print(f"Error reading parquet for {ticker}: {e}")
+            return None
+
+    def get_duckdb_connection(self) -> duckdb.DuckDBPyConnection:
+        """Expose raw connection for complex analytical queries."""
+        return self._get_connection()
 
 # Global instance
 db = DatabaseManager()

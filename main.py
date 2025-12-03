@@ -18,7 +18,7 @@ from modules import data_loader, ui_layout
 # Configuration
 REFRESH_RATE_SECONDS = 0.5  # UI update rate
 DATA_FETCH_INTERVAL = 60    # Data fetch interval in seconds
-
+DEFAULT_COUNTRY = "US"      # Default country to monitor
 
 def main():
     """Main entry point."""
@@ -30,13 +30,19 @@ def main():
         console.clear()
         
         # Initial Data Fetch
-        console.print("[yellow]Initializing Project Sentinel...[/yellow]")
-        us_data = data_loader.get_us_metrics()
-        sa_data = data_loader.get_sa_metrics()
+        console.print(f"[yellow]Initializing Project Sentinel ({DEFAULT_COUNTRY})...[/yellow]")
+        
+        # Fetch initial metrics
+        metrics_data = data_loader.get_country_metrics(DEFAULT_COUNTRY)
+        
+        # Ensure liquidity data is ready (triggers fetch if needed)
+        # We do this once at startup to avoid delay in the loop
+        data_loader.get_net_liquidity_data()
+        
         last_fetch_time = time.time()
         
         # Initial Layout
-        layout = ui_layout.build_dashboard_layout(us_data, sa_data, blink_state=True)
+        layout = ui_layout.build_dashboard_layout(DEFAULT_COUNTRY, metrics_data, blink_state=True)
         
         # Live Loop
         with Live(layout, screen=True, refresh_per_second=4) as live:
@@ -45,17 +51,14 @@ def main():
                 
                 # Check if we need to refresh data
                 if current_time - last_fetch_time >= DATA_FETCH_INTERVAL:
-                    us_data = data_loader.get_us_metrics()
-                    sa_data = data_loader.get_sa_metrics()
+                    metrics_data = data_loader.get_country_metrics(DEFAULT_COUNTRY)
                     last_fetch_time = current_time
                 
                 # Update Blink State (toggle every second)
                 blink_state = int(current_time * 2) % 2 == 0
                 
                 # Rebuild Layout
-                # Note: In a highly optimized app, we would update specific parts of the layout
-                # instead of rebuilding the whole tree, but for this scale, this is fine.
-                layout = ui_layout.build_dashboard_layout(us_data, sa_data, blink_state)
+                layout = ui_layout.build_dashboard_layout(DEFAULT_COUNTRY, metrics_data, blink_state)
                 live.update(layout)
                 
                 # Sleep a bit to prevent 100% CPU usage
