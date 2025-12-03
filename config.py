@@ -42,6 +42,7 @@ FRED_SERIES = {
 # =============================================================================
 YFINANCE_TICKERS = {
     "us_10y_yield": "^TNX",    # 10-Year Treasury Yield
+    "us_3m_yield": "^IRX",     # 13-Week Treasury Bill Yield
     "usd_zar": "ZAR=X",        # USD/ZAR Exchange Rate
 }
 
@@ -56,6 +57,7 @@ THRESHOLDS = {
     # US 10Y Yield thresholds
     "us_10y_warning": 4.5,           # 4.5% - Elevated
     "us_10y_vigilante": 5.0,         # 5.0% - Bond Vigilante Attack
+    "yield_curve_warning": 0.0,      # 0.0% - Inversion Point (Recession Signal)
     
     # USD/ZAR thresholds
     "usd_zar_warning": 18.0,         # Elevated

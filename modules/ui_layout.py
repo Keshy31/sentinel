@@ -63,36 +63,46 @@ def create_us_panel(data: dict) -> Panel:
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="white", justify="right")
     
-    # Core Metrics
+    # Core Metrics (Aligned with SA)
     table.add_row("Total Public Debt", format_value(data.get("total_debt"), " B", 0))
     table.add_row("GDP", format_value(data.get("gdp"), " B", 0))
     table.add_row("Interest Payments", format_value(data.get("interest_payments"), " B", 1))
     table.add_row("Tax Receipts", format_value(data.get("tax_receipts"), " B", 1))
     table.add_row("10Y Treasury Yield", format_value(data.get("yield_10y"), "%", 2))
     
-    # Real Yield & Growth Spread
+    # Yield Curve (10Y - 3M)
     yield_10y = data.get("yield_10y")
-    inflation = data.get("inflation_yoy")
+    yield_3m = data.get("yield_3m")
+    if yield_10y is not None and yield_3m is not None:
+        spread = logic.calculate_yield_spread(yield_10y, yield_3m)
+        status = logic.get_yield_curve_status(spread)
+        color = "red" if status == "CRITICAL" else "green"
+        table.add_row("Yield Curve (10Y-3M)", f"[bold {color}]{spread:+.2f}%[/bold {color}]")
+    else:
+        table.add_row("Yield Curve (10Y-3M)", "[dim]N/A[/dim]")
+    
+    # Growth Spread (r-g)
+    yield_10y = data.get("yield_10y")
     gdp_growth = data.get("gdp_growth")
-    
-    if yield_10y is not None and inflation is not None:
-        real_yield = logic.calculate_real_yield(yield_10y, inflation)
-        table.add_row("Real Yield (r-i)", format_value(real_yield, "%", 2))
-    
     if yield_10y is not None and gdp_growth is not None:
         spread = logic.calculate_growth_spread(yield_10y, gdp_growth)
         status = logic.get_growth_spread_status(spread)
         color = "red" if status == "CRITICAL" else "green"
         table.add_row("Growth Spread (r-g)", f"[bold {color}]{spread:+.1f}%[/bold {color}]")
+    else:
+        table.add_row("Growth Spread (r-g)", "[dim]N/A[/dim]")
 
-    # Ratios
+    # Interest/Revenue Ratio
     if data.get("interest_payments") and data.get("tax_receipts"):
         ratio = logic.calculate_interest_revenue_ratio(
             data["interest_payments"],
             data["tax_receipts"]
         )
         table.add_row("Interest/Revenue", format_ratio_with_status(ratio))
+    else:
+        table.add_row("Interest/Revenue", "[dim]N/A[/dim]")
     
+    # Debt/GDP Ratio
     if data.get("total_debt") and data.get("gdp"):
         debt_gdp = logic.calculate_debt_to_gdp_ratio(data["total_debt"], data["gdp"])
         
@@ -103,14 +113,29 @@ def create_us_panel(data: dict) -> Panel:
         elif status == "WARNING": color = "yellow"
         
         table.add_row("Debt/GDP", f"[{color}]{debt_gdp:,.1f}%[/{color}]")
+    else:
+        table.add_row("Debt/GDP", "[dim]N/A[/dim]")
+        
+    # US Specific Extra: Real Yield
+    inflation = data.get("inflation_yoy")
+    if yield_10y is not None and inflation is not None:
+        real_yield = logic.calculate_real_yield(yield_10y, inflation)
+        table.add_row("Real Yield (r-i)", format_value(real_yield, "%", 2))
     
     # Vigilante Alert
     if yield_10y and logic.get_bond_vigilante_status(yield_10y):
         table.add_row("", "")
         table.add_row("[bold white on red]⚠️ VIGILANTE ATTACK[/bold white on red]", "")
 
+    # Yield Curve Alert
+    if yield_10y is not None and yield_3m is not None:
+        spread = logic.calculate_yield_spread(yield_10y, yield_3m)
+        if logic.get_yield_curve_status(spread) == "CRITICAL":
+            table.add_row("", "")
+            table.add_row("[bold white on red]⚠️ YIELD CURVE INVERTED[/bold white on red]", "")
+
     # Sparkline
-    sparkline = render_chart.build_sparkline("^TNX", months=6, width=40, height=10)
+    sparkline = render_chart.build_sparkline("^TNX", months=6, width=65, height=8)
     
     content = Group(
         table,
@@ -127,6 +152,9 @@ def create_us_panel(data: dict) -> Panel:
             border_style = "red"
     if yield_10y and logic.get_bond_vigilante_status(yield_10y):
         border_style = "red"
+    if yield_10y is not None and yield_3m is not None:
+        if logic.get_yield_curve_status(logic.calculate_yield_spread(yield_10y, yield_3m)) == "CRITICAL":
+            border_style = "red"
     
     return Panel(
         content,
@@ -141,44 +169,12 @@ def create_sa_panel(data: dict) -> Panel:
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="white", justify="right")
     
+    # Core Metrics (Aligned with US)
     table.add_row("Total Debt", format_value(data.get("debt_zar_billions"), " B ZAR", 0))
-    table.add_row("Annual Revenue", format_value(data.get("annual_revenue_zar_billions"), " B ZAR", 0))
+    table.add_row("GDP", format_value(data.get("gdp_zar_billions"), " B ZAR", 0))
     table.add_row("Interest Expense", format_value(data.get("annual_interest_expense_zar_billions"), " B ZAR", 0))
-    table.add_row("GDP Growth Forecast", format_value(data.get("gdp_growth_forecast_pct"), "%", 1))
+    table.add_row("Annual Revenue", format_value(data.get("annual_revenue_zar_billions"), " B ZAR", 0))
     table.add_row("10Y Yield (Static)", format_value(data.get("bond_yield_10y_static"), "%", 1))
-    table.add_row("USD/ZAR (Live)", format_value(data.get("usd_zar"), "", 2))
-    
-    # Debt/GDP (Estimated or Actual)
-    rev = data.get("annual_revenue_zar_billions")
-    debt = data.get("debt_zar_billions")
-    gdp = data.get("gdp_zar_billions")
-    
-    if debt:
-        if gdp:
-            debt_gdp = logic.calculate_debt_to_gdp_ratio(debt, gdp)
-            label = "Debt/GDP"
-        elif rev:
-            est_gdp = rev * 4.0 # Estimate GDP as ~4x Revenue
-            debt_gdp = logic.calculate_debt_to_gdp_ratio(debt, est_gdp)
-            label = "Debt/GDP (Est)"
-        else:
-            debt_gdp = None
-            
-        if debt_gdp is not None:
-            # Color code
-            status = logic.get_debt_gdp_status(debt_gdp, is_emerging_market=True)
-            color = "white"
-            if status == "CRITICAL": color = "red"
-            elif status == "WARNING": color = "yellow"
-            
-            table.add_row(label, f"[{color}]{debt_gdp:.1f}%[/{color}]")
-
-    # Ratios
-    interest = data.get("annual_interest_expense_zar_billions")
-    revenue = data.get("annual_revenue_zar_billions")
-    if interest and revenue:
-        ratio = logic.calculate_interest_revenue_ratio(interest, revenue)
-        table.add_row("Interest/Revenue", format_ratio_with_status(ratio))
     
     # Growth Spread
     bond_yield = data.get("bond_yield_10y_static")
@@ -188,7 +184,50 @@ def create_sa_panel(data: dict) -> Panel:
         status = logic.get_growth_spread_status(spread)
         color = "red" if status == "CRITICAL" else "green"
         table.add_row("Growth Spread (r-g)", f"[bold {color}]{spread:+.1f}%[/bold {color}]")
+    else:
+         table.add_row("Growth Spread (r-g)", "[dim]N/A[/dim]")
+         
+    # Interest/Revenue
+    interest = data.get("annual_interest_expense_zar_billions")
+    revenue = data.get("annual_revenue_zar_billions")
+    if interest and revenue:
+        ratio = logic.calculate_interest_revenue_ratio(interest, revenue)
+        table.add_row("Interest/Revenue", format_ratio_with_status(ratio))
+    else:
+        table.add_row("Interest/Revenue", "[dim]N/A[/dim]")
     
+    # Debt/GDP
+    rev = data.get("annual_revenue_zar_billions")
+    debt = data.get("debt_zar_billions")
+    gdp = data.get("gdp_zar_billions")
+    
+    if debt:
+        debt_gdp = None
+        label = "Debt/GDP"
+        
+        if gdp:
+            debt_gdp = logic.calculate_debt_to_gdp_ratio(debt, gdp)
+        elif rev:
+            est_gdp = rev * 4.0 # Estimate GDP as ~4x Revenue
+            debt_gdp = logic.calculate_debt_to_gdp_ratio(debt, est_gdp)
+            label = "Debt/GDP (Est)"
+            
+        if debt_gdp is not None:
+            # Color code
+            status = logic.get_debt_gdp_status(debt_gdp, is_emerging_market=True)
+            color = "white"
+            if status == "CRITICAL": color = "red"
+            elif status == "WARNING": color = "yellow"
+            
+            table.add_row(label, f"[{color}]{debt_gdp:.1f}%[/{color}]")
+        else:
+             table.add_row("Debt/GDP", "[dim]N/A[/dim]")
+    else:
+        table.add_row("Debt/GDP", "[dim]N/A[/dim]")
+
+    # SA Specific Extra: USD/ZAR
+    table.add_row("USD/ZAR (Live)", format_value(data.get("usd_zar"), "", 2))
+
     # Currency Risk Alert
     usd_zar = data.get("usd_zar")
     if usd_zar and logic.get_currency_risk_status(usd_zar):
@@ -196,7 +235,7 @@ def create_sa_panel(data: dict) -> Panel:
         table.add_row("[bold white on red]⚠️ CURRENCY CRISIS[/bold white on red]", "")
 
     # Sparkline
-    sparkline = render_chart.build_sparkline("ZAR=X", months=6, width=40, height=10)
+    sparkline = render_chart.build_sparkline("ZAR=X", months=6, width=65, height=8)
     
     content = Group(
         table,
@@ -225,7 +264,8 @@ def create_sa_panel(data: dict) -> Panel:
 def create_charts_panel() -> Panel:
     """Create the historical charts panel."""
     # US Growth Spread Chart (US_GROWTH_SPREAD)
-    chart = render_chart.build_full_chart("US_GROWTH_SPREAD", months=6, width=80, height=12)
+    # Increased width to 120 for better visibility on wide monitors
+    chart = render_chart.build_full_chart("US_GROWTH_SPREAD", months=6, width=135, height=10)
     
     content = Group(
         Text("US Growth Spread (Yield vs GDP) - 6 Month Trend", style="bold cyan"),

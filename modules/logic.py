@@ -72,6 +72,23 @@ def calculate_real_yield(
     return nominal_yield - inflation_rate
 
 
+def calculate_yield_spread(
+    long_yield: float,
+    short_yield: float
+) -> float:
+    """
+    Calculate Yield Curve Spread (e.g., 10Y - 3M).
+    
+    Args:
+        long_yield: Long-term bond yield (e.g., 10Y)
+        short_yield: Short-term bond yield (e.g., 3M)
+        
+    Returns:
+        Spread in percentage points.
+    """
+    return long_yield - short_yield
+
+
 def calculate_debt_to_gdp_ratio(
     total_debt: float,
     gdp: float
@@ -129,6 +146,21 @@ def get_growth_spread_status(spread: float) -> AlertStatus:
         AlertStatus: "SAFE" if negative (growth > yield), "CRITICAL" if positive
     """
     if spread > 0:
+        return "CRITICAL"
+    return "SAFE"
+
+
+def get_yield_curve_status(spread: float) -> AlertStatus:
+    """
+    Determine alert status based on Yield Curve Spread (10Y - 3M).
+    
+    Args:
+        spread: Yield spread in percentage points
+        
+    Returns:
+        AlertStatus: "CRITICAL" if negative (Inverted), "SAFE" if positive
+    """
+    if spread < 0:
         return "CRITICAL"
     return "SAFE"
 

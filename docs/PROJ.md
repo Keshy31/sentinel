@@ -4,27 +4,30 @@ This document outlines the architecture, data strategy, and development phases f
 
 # Project Sentinel: Sovereign Debt & Fiscal Dominance Monitor
 
-## 1\. Executive Summary
+## 1. Executive Summary
 
 **Project Sentinel** is a real-time command-line interface (CLI) dashboard. Its purpose is to track the transition of the US and South African economies from "Normal" debt cycles into "Fiscal Dominance" (The Doom Loop).
 
 It visualizes the "Druckenmiller Thesis"—comparing government borrowing costs ($r$) against economic growth ($g$) and tax revenues—to identify when debt service becomes mathematically unsustainable.
 
-## 2\. Theoretical Framework
+## 2. Theoretical Framework
 
 The dashboard does not just show numbers; it evaluates the **health of the debt cycle** based on three triggers:
 
 1.  **The Growth Gap ($r - g$):**
-      * *Safe:* GDP Growth ($g$) \> Bond Yield ($r$).
-      * *Danger:* Bond Yield ($r$) \> GDP Growth ($g$).
+      * *Safe:* GDP Growth ($g$) > Bond Yield ($r$).
+      * *Danger:* Bond Yield ($r$) > GDP Growth ($g$).
 2.  **The Tax Squeeze (Interest vs. Revenue):**
-      * *Safe:* Interest payments consume \< 10% of tax revenue.
-      * *Critical:* Interest payments consume \> 20% of tax revenue (The "Doom Loop" Threshold).
+      * *Safe:* Interest payments consume < 10% of tax revenue.
+      * *Critical:* Interest payments consume > 20% of tax revenue (The "Doom Loop" Threshold).
 3.  **Market Confidence:**
       * Rising Long-Term Yields (Bond Vigilantes revolting).
       * Currency devaluation (Loss of trust).
+4.  **Yield Curve Inversion (Recession Signal):**
+      * *Safe:* 10Y Yield > 3M Yield (Positive slope).
+      * *Critical:* 3M Yield > 10Y Yield (Inverted - Recession Warning).
 
-## 3\. System Architecture
+## 3. System Architecture
 
 ### Tech Stack
 
@@ -50,13 +53,15 @@ The dashboard does not just show numbers; it evaluates the **health of the debt 
                                                                              [Rich UI Renderer]
 ```
 
-## 4\. Data Strategy
+## 4. Data Strategy
 
 ### A. United States (Fully Automated)
 
 We will programmatically fetch all US metrics to ensure real-time accuracy.
 
-  * **Market Data (Live):** US 10Y Yield (`^TNX`).
+  * **Market Data (Live):** 
+      * US 10Y Yield (`^TNX`).
+      * US 3M Yield (`^IRX`).
   * **Macro Data (Lagged/Monthly):**
       * Total Public Debt (`GFDEBTN`).
       * Federal Interest Outlays (`A091RC1Q027SBEA`).
@@ -71,7 +76,7 @@ To prevent API rate limits and enable offline startup, all fetched data is cache
   * **Market Data:** Cached for 15 minutes.
   * **Fallback:** If API fails, display last known good value from DB with a "STALE" warning.
 
-## 5\. Development Phases
+## 5. Development Phases
 
 We will build this in 4 distinct phases. Each phase results in a testable milestone.
 
@@ -120,9 +125,10 @@ We will build this in 4 distinct phases. Each phase results in a testable milest
       * Logic:
           * IF `US Interest/Rev > 18%` $\rightarrow$ Display Warning.
           * IF `US 10Y > 5%` $\rightarrow$ Display "VIGILANTE ATTACK".
+          * IF `10Y - 3M < 0` $\rightarrow$ Display "YIELD CURVE INVERTED".
   * **Test:** Verify that threshold logic correctly triggers the visual warnings.
 
-## 6\. Project Directory Structure
+## 6. Project Directory Structure
 
 ```text
 project_sentinel/
@@ -139,4 +145,3 @@ project_sentinel/
 │   └── ui_layout.py      # Rich panels and table composition
 └── requirements.txt      # Dependencies
 ```
-

@@ -8,13 +8,13 @@ This document serves as the **Technical Specification** for "Project Sentinel." 
 **Type:** CLI Financial Dashboard
 **Target System:** Local Terminal (Python)
 
-## 1\. Project Overview
+## 1. Project Overview
 
 Project Sentinel is a real-time command-line dashboard designed to monitor **Sovereign Debt Risk** for the United States and South Africa. It visualizes the "Fiscal Dominance" thesis by tracking debt service costs relative to government revenue and economic growth.
 
 **The "Why":** We need to detect when a country enters a "Doom Loop"—defined mathematically as when Interest Rates ($r$) exceed Growth Rates ($g$) and Interest Expense exceeds 20% of Tax Revenue.
 
-## 2\. System Architecture
+## 2. System Architecture
 
 The application follows a **Modular Monolith** pattern. It separates data fetching (IO-bound) from business logic (CPU-bound) and presentation (UI).
 
@@ -64,7 +64,7 @@ project_sentinel/
 └── requirements.txt      # Dependencies
 ```
 
-## 3\. Tech Stack & Dependencies
+## 3. Tech Stack & Dependencies
 
   * **Runtime:** Python 3.10+
   * **Core Libraries:**
@@ -76,7 +76,7 @@ project_sentinel/
       * `yfinance`: To fetch live bond yields and currency pairs.
       * `python-dotenv`: To manage security (API Keys).
 
-## 4\. Data Ingestion Strategy
+## 4. Data Ingestion Strategy
 
 We use a **Hybrid Data Model**: Automated API calls for the US, and a "Live Market + Manual Fiscal" mix for South Africa, all backed by a **SQLite Cache**.
 
@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS chart_cache (
       * `GDP`: Gross Domestic Product (Quarterly)
   * **Source:** YFinance
       * `^TNX`: 10-Year Treasury Yield (Live)
+      * `^IRX`: 13-Week Treasury Bill Yield (Live)
 
 ### B. South Africa (Hybrid)
 
@@ -135,7 +136,7 @@ CREATE TABLE IF NOT EXISTS chart_cache (
     }
     ```
 
-## 5\. Core Logic Algorithms
+## 5. Core Logic Algorithms
 
 The `logic.py` module must implement these specific formulas.
 
@@ -151,7 +152,13 @@ $$Spread = \text{10Y Bond Yield} (r) - \text{GDP Growth Rate} (g)$$
       * If $Spread < 0$: **Safe** (Growth is outpacing debt cost).
       * If $Spread > 0$: **Danger** (Debt is compounding faster than income).
 
-## 6\. UI/UX Specification
+**3. Yield Curve Spread (10Y - 3M)**
+$$Spread = \text{10Y Yield} - \text{3M Yield}$$
+
+  * *Logic:*
+      * If $Spread < 0$: **Critical** (Inverted Curve = Recession Signal).
+
+## 6. UI/UX Specification
 
 The dashboard utilizes `rich.layout` to split the terminal into a grid.
 
@@ -166,6 +173,7 @@ The dashboard utilizes `rich.layout` to split the terminal into a grid.
 |  Debt/GDP:      123% [RED]   |  USD/ZAR:      18.45 [YEL]     |
 |  Interest/Rev:  18%  [YEL]   |  Interest/Rev: 22%   [RED]     |
 |  10Y Yield:     4.5%         |  10Y Yield:    11.5%           |
+|  Yield Curve:   -0.5% [RED]  |                                |
 |                              |                                |
 |  [ PLOTEXT CHART AREA ]      |  [ PLOTEXT CHART AREA ]        |
 |  (US 10Y Trend - 6 Months)   |  (USD/ZAR Trend - 6 Months)    |
@@ -175,7 +183,7 @@ The dashboard utilizes `rich.layout` to split the terminal into a grid.
 +---------------------------------------------------------------+
 ```
 
-## 7\. Implementation Steps (For the Junior Engineer)
+## 7. Implementation Steps (For the Junior Engineer)
 
 ### Phase 1: Data Harness (No UI)
 
@@ -208,7 +216,7 @@ The dashboard utilizes `rich.layout` to split the terminal into a grid.
       * If US Interest/Rev \> 18%: Change Panel Border to **Red**.
       * If USD/ZAR \> 19.00: Flash the text.
 
-## 8\. Immediate Action Items
+## 8. Immediate Action Items
 
 1.  **Get API Key:** Register for a free API key at [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html).
 2.  **Environment:**

@@ -112,6 +112,7 @@ def get_us_metrics() -> dict:
         "tax_receipts": None,
         "gdp": None,
         "yield_10y": None,
+        "yield_3m": None,
         "gdp_growth": None,
         "inflation_yoy": None,
         "last_updated": datetime.now().isoformat(),
@@ -184,6 +185,22 @@ def get_us_metrics() -> dict:
         source_name="YFinance ^TNX",
         errors_list=result["errors"]
     )
+
+    # Process US 3M Yield (^IRX)
+    def fetch_us_3m():
+        ticker = yf.Ticker(config.YFINANCE_TICKERS["us_3m_yield"])
+        hist = ticker.history(period="1d")
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
+        return None
+
+    result["yield_3m"] = get_cached_or_fetch(
+        key="us_3m_yield",
+        fetch_func=fetch_us_3m,
+        expiry_seconds=config.CACHE_EXPIRY_MARKET,
+        source_name="YFinance ^IRX",
+        errors_list=result["errors"]
+    )
     
     return result
 
@@ -251,6 +268,7 @@ def get_live_market_data() -> dict:
     """
     result = {
         "us_10y_yield": None,
+        "us_3m_yield": None,
         "usd_zar": None,
         "timestamp": datetime.now().isoformat(),
         "errors": []
@@ -269,6 +287,22 @@ def get_live_market_data() -> dict:
         fetch_func=fetch_us_10y,
         expiry_seconds=config.CACHE_EXPIRY_MARKET,
         source_name="YFinance ^TNX",
+        errors_list=result["errors"]
+    )
+
+    # Fetch US 3M Yield
+    def fetch_us_3m():
+        ticker = yf.Ticker(config.YFINANCE_TICKERS["us_3m_yield"])
+        hist = ticker.history(period="1d")
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
+        return None
+
+    result["us_3m_yield"] = get_cached_or_fetch(
+        key="us_3m_yield",
+        fetch_func=fetch_us_3m,
+        expiry_seconds=config.CACHE_EXPIRY_MARKET,
+        source_name="YFinance ^IRX",
         errors_list=result["errors"]
     )
     
