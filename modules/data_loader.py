@@ -98,7 +98,7 @@ def get_country_metrics(country_code: str) -> dict:
     Fetch standard metrics for a specific country.
     
     Args:
-        country_code: 'US' or 'SA' (must exist in config.COUNTRIES)
+        country_code: 'US', 'SA', 'JP', 'UK', 'DE' (must exist in config.COUNTRIES)
         
     Returns:
         Dictionary containing standard metrics:
@@ -110,6 +110,7 @@ def get_country_metrics(country_code: str) -> dict:
         - yield_10y
         - inflation_yoy
         - last_updated
+        - errors
     """
     if country_code not in config.COUNTRIES:
         return {"errors": [f"Unknown country code: {country_code}"]}
@@ -170,8 +171,9 @@ def _fetch_fred_metrics(country_config: dict, result: dict):
         return None
 
     for key, series_id in metrics_map.items():
-        # Skip market data tickers (start with ^ or look like tickers)
-        if key == "yield_10y" or key == "usd_zar": continue 
+        # Skip market data tickers if they look like YFinance tickers
+        if str(series_id).startswith("^") or "=" in str(series_id):
+            continue
         
         # Special handling for inflation
         if key == "inflation_yoy":
@@ -220,7 +222,7 @@ def _fetch_json_metrics(country_config: dict, result: dict):
 
 
 def _fetch_live_market_data(country_config: dict, result: dict):
-    """Fetch live market data (Yields, FX) from YFinance."""
+    """Fetch live market data (Yields, FX, Gold) from YFinance."""
     metrics_map = country_config.get("metrics", {})
     
     def fetch_ticker(ticker):
@@ -230,34 +232,28 @@ def _fetch_live_market_data(country_config: dict, result: dict):
             return float(hist["Close"].iloc[-1])
         return None
 
-    # Check for yield_10y
-    if "yield_10y" in metrics_map:
-        ticker = metrics_map["yield_10y"]
-        # Only fetch if it looks like a ticker (not a FRED ID) or we want to force it
-        # For SA, it's ZAR=X, for US it's ^TNX
-        if ticker:
-             val = get_cached_or_fetch(
-                key=ticker,
-                fetch_func=lambda t=ticker: fetch_ticker(t),
-                expiry_seconds=config.CACHE_EXPIRY_MARKET,
-                source_name=f"YFinance {ticker}",
-                errors_list=result["errors"]
-            )
-             # Prefer live data over static JSON if available
-             if val is not None:
-                 result["yield_10y"] = val
+    # Helper to process a metric key
+    def process_ticker_metric(metric_key):
+        if metric_key in metrics_map:
+            ticker = metrics_map[metric_key]
+            # Only process if it LOOKS like a ticker (contains ^ or =)
+            # Exception: US 10Y is ^TNX, SA is ZAR=X.
+            # But FRED IDs are just alphanum.
+            if ticker and (str(ticker).startswith("^") or "=" in str(ticker)):
+                val = get_cached_or_fetch(
+                    key=ticker,
+                    fetch_func=lambda t=ticker: fetch_ticker(t),
+                    expiry_seconds=config.CACHE_EXPIRY_MARKET,
+                    source_name=f"YFinance {ticker}",
+                    errors_list=result["errors"]
+                )
+                if val is not None:
+                    result[metric_key] = val
 
-    # Check for usd_zar or other FX
-    if "usd_zar" in metrics_map:
-        ticker = metrics_map["usd_zar"]
-        val = get_cached_or_fetch(
-            key=ticker,
-            fetch_func=lambda t=ticker: fetch_ticker(t),
-            expiry_seconds=config.CACHE_EXPIRY_MARKET,
-            source_name=f"YFinance {ticker}",
-            errors_list=result["errors"]
-        )
-        result["usd_zar"] = val
+    # Check for specific market metrics
+    process_ticker_metric("yield_10y")
+    process_ticker_metric("usd_zar")
+    process_ticker_metric("gold")
 
 
 def get_yield_curve_data(country_code: str) -> Optional[Dict[str, float]]:
@@ -454,5 +450,88 @@ def get_net_liquidity_data() -> Optional[pd.DataFrame]:
         
     except Exception as e:
         print(f"DuckDB Query Error: {e}")
+        conn.close()
+        return None
+
+def fetch_fiscal_history(years: int = 10) -> bool:
+    """
+    Fetch and cache historical Interest Payments and Tax Receipts for regression.
+    """
+    fred = get_fred_client()
+    if not fred: return False
+    
+    # Define time range
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=years*365)
+    
+    try:
+        us_metrics = config.COUNTRIES["US"]["metrics"]
+        series_map = {
+            "interest_payments": us_metrics["interest_payments"],
+            "tax_receipts": us_metrics["tax_receipts"]
+        }
+        
+        for key, series_id in series_map.items():
+            # Fetch from FRED
+            series = fred.get_series(series_id, observation_start=start_date, observation_end=end_date)
+            
+            if series is not None and not series.empty:
+                # Convert to DataFrame
+                df = series.to_frame(name="Value")
+                df.index.name = "Date"
+                
+                # Use series ID as cache key
+                db.set_chart(series_id, df)
+            else:
+                print(f"Warning: Empty data for {series_id}")
+                return False
+                
+        return True
+        
+    except Exception as e:
+        print(f"Error fetching fiscal history: {e}")
+        return False
+
+def get_fiscal_history_data() -> Optional[pd.DataFrame]:
+    """
+    Retrieve historical Interest Payments and Tax Receipts joined by Date.
+    """
+    conn = db.get_duckdb_connection()
+    
+    us_metrics = config.COUNTRIES["US"]["metrics"]
+    key_int = us_metrics["interest_payments"]
+    key_tax = us_metrics["tax_receipts"]
+    
+    # Construct paths
+    def get_path(series_id):
+        return str(config.DATA_DIR / "cache" / f"{series_id}.parquet")
+        
+    path_int = get_path(key_int)
+    path_tax = get_path(key_tax)
+    
+    query = f"""
+        WITH 
+        interest AS (SELECT CAST(Date AS DATE) as d, Value as interest_val FROM read_parquet('{path_int}')),
+        tax AS (SELECT CAST(Date AS DATE) as d, Value as tax_val FROM read_parquet('{path_tax}'))
+        
+        SELECT 
+            interest.d as Date,
+            interest.interest_val,
+            tax.tax_val,
+            (interest.interest_val / tax.tax_val) as ratio
+        FROM interest
+        JOIN tax ON interest.d = tax.d
+        ORDER BY Date ASC
+    """
+    
+    try:
+        df = conn.execute(query).df()
+        conn.close()
+        if not df.empty:
+            df.set_index('Date', inplace=True)
+            return df
+        return None
+    except Exception as e:
+        print(f"DuckDB Fiscal History Query Error: {e}")
         conn.close()
         return None

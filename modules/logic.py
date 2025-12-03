@@ -6,9 +6,18 @@ Pure functions for financial calculations:
 - Growth Spread (r - g)
 - Real Yield (r - inflation)
 - Threshold checks and alert status
+
+Advanced Analytics:
+- Market Real Yield (using Breakevens)
+- Term Premium Analysis
+- Doom Loop Regression Forecasting
 """
 
-from typing import Literal
+from typing import Literal, Optional, Tuple
+from datetime import datetime, timedelta
+from sklearn.linear_model import LinearRegression
+
+from modules import data_loader
 
 AlertStatus = Literal["SAFE", "WARNING", "CRITICAL"]
 
@@ -32,6 +41,27 @@ def calculate_interest_revenue_ratio(
     if tax_revenue == 0:
         return float('inf')
     return interest_expense / tax_revenue
+
+
+def calculate_days_of_interest(
+    total_debt: float,
+    avg_interest_rate: float
+) -> float:
+    """
+    Calculate Daily Interest Cost (Days of Interest).
+    
+    Formula: Daily Cost = (Total Debt * (Average Interest Rate / 100)) / 365
+    
+    Args:
+        total_debt: Total Public Debt (Billions)
+        avg_interest_rate: Average Interest Rate on Debt (%) (Approximate with 10Y Yield or blended rate)
+    
+    Returns:
+        Daily Interest Cost in Billions.
+    """
+    if total_debt is None or avg_interest_rate is None:
+        return 0.0
+    return (total_debt * (avg_interest_rate / 100.0)) / 365.0
 
 
 def calculate_growth_spread(
@@ -196,3 +226,102 @@ def get_debt_gdp_status(
     elif ratio >= warn:
         return "WARNING"
     return "SAFE"
+
+
+# =============================================================================
+# Advanced Analytics (Phase 4)
+# =============================================================================
+
+def calculate_market_real_yield(
+    nominal_10y: float,
+    breakeven_5y: float
+) -> float:
+    """
+    Calculate Market Real Yield.
+    
+    Formula: 10Y Nominal Yield - 5Y Breakeven Inflation
+    This represents the real return investors demand.
+    """
+    return nominal_10y - breakeven_5y
+
+
+def calculate_fed_rate_expectation(
+    nominal_10y: float,
+    term_premium_10y: float
+) -> float:
+    """
+    Decompose 10Y Yield to find implied Fed Rate path.
+    
+    Formula: Fed Expectation = 10Y Nominal - Term Premium
+    """
+    return nominal_10y - term_premium_10y
+
+
+def predict_doom_loop_day_zero() -> Tuple[Optional[float], Optional[str]]:
+    """
+    Predict when Interest will consume 100% of Tax Revenue (Ratio = 1.0).
+    
+    Returns:
+        Tuple[years_remaining, estimated_date_str]
+        years_remaining: Float years until Day Zero (e.g., 12.4)
+        estimated_date_str: Formatted date string (e.g., "2038-05-12")
+    """
+    # 1. Get Data
+    df = data_loader.get_fiscal_history_data()
+    
+    # If missing, try to fetch
+    if df is None:
+        print("Fetching Fiscal History for Regression...")
+        success = data_loader.fetch_fiscal_history()
+        if success:
+            df = data_loader.get_fiscal_history_data()
+            
+    if df is None or df.empty:
+        return None, "Insufficient Data"
+        
+    # 2. Prepare for Regression
+    # We want to regress Ratio vs Time
+    # X = Time (ordinal), y = Ratio
+    
+    # Use last 10 years or all available
+    df = df.dropna()
+    if len(df) < 10:
+        return None, "Insufficient Data Points"
+        
+    # Create ordinal date
+    # Fix: Wrap toordinal in lambda to avoid TypeError
+    df['date_ordinal'] = df.index.map(lambda x: x.toordinal())
+    
+    X = df['date_ordinal'].values.reshape(-1, 1)
+    y = df['ratio'].values
+    
+    # 3. Fit Model
+    model = LinearRegression()
+    model.fit(X, y)
+    
+    slope = model.coef_[0]
+    intercept = model.intercept_
+    
+    # 4. Solve for y = 1.0
+    # 1.0 = slope * x + intercept
+    # x = (1.0 - intercept) / slope
+    
+    if slope <= 0:
+        return None, "Trend is Improving (Slope <= 0)"
+        
+    day_zero_ordinal = (1.0 - intercept) / slope
+    
+    try:
+        day_zero_date = datetime.fromordinal(int(day_zero_ordinal))
+        now = datetime.now()
+        
+        days_remaining = (day_zero_date - now).days
+        years_remaining = days_remaining / 365.25
+        
+        if years_remaining < 0:
+             return 0.0, "Already Passed!"
+             
+        return years_remaining, day_zero_date.strftime("%Y-%m-%d")
+        
+    except Exception as e:
+        return None, f"Calculation Error: {e}"

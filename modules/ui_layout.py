@@ -109,6 +109,15 @@ def create_indicators_panel(country_code: str, data: dict) -> Panel:
     else:
         fiscal_table.add_row("Debt/GDP", "[dim]N/A[/dim]")
 
+    # Doom Loop Forecast
+    if country_code == "US": # Only for US currently
+        years, date_str = logic.predict_doom_loop_day_zero()
+        if years is not None:
+            color = "red" if years < 10 else "yellow"
+            fiscal_table.add_row("Doom Loop Day Zero", f"[{color}]{years:.1f} Yrs ({date_str})[/{color}]")
+        else:
+            fiscal_table.add_row("Doom Loop Day Zero", "[dim]Calculating...[/dim]")
+
     # --- Right Column: MONETARY & ECONOMIC ---
     monetary_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2), expand=True)
     monetary_table.add_column("Metric", style="cyan")
@@ -116,34 +125,35 @@ def create_indicators_panel(country_code: str, data: dict) -> Panel:
 
     monetary_table.add_row("[bold]MONETARY & ECONOMIC[/bold]", "")
     
-    # Yields & Inflation
+    # Yields
     yield_10y = data.get("yield_10y")
     monetary_table.add_row("10Y Bond Yield", format_value(yield_10y, "%", 2))
     
-    inflation = data.get("inflation_yoy")
-    monetary_table.add_row("Inflation (YoY)", format_value(inflation, "%", 2))
-    
-    # Real Yield (r - i)
-    if yield_10y is not None and inflation is not None:
-        real_yield = logic.calculate_real_yield(yield_10y, inflation)
+    # Market Real Yield (Preferred) vs Standard
+    breakeven = data.get("breakeven_5y")
+    if yield_10y is not None and breakeven is not None:
+        real_yield = logic.calculate_market_real_yield(yield_10y, breakeven)
         color = "green" if real_yield > 0 else "red"
-        monetary_table.add_row("Real Yield (r - i)", f"[{color}]{real_yield:+.2f}%[/{color}]")
+        monetary_table.add_row("Market Real Yield", f"[{color}]{real_yield:+.2f}%[/{color}]")
+        monetary_table.add_row("Inflation Exp (5Y)", format_value(breakeven, "%", 2))
     else:
-         monetary_table.add_row("Real Yield (r - i)", "[dim]N/A[/dim]")
-         
-    # Growth Spread (r - g)
-    gdp_growth = data.get("gdp_growth")
-    if yield_10y is not None and gdp_growth is not None:
-        spread = logic.calculate_growth_spread(yield_10y, gdp_growth)
-        status = logic.get_growth_spread_status(spread)
-        color = "red" if status == "CRITICAL" else "green"
-        monetary_table.add_row("Growth Spread (r - g)", f"[bold {color}]{spread:+.2f}%[/bold {color}]")
-    else:
-        monetary_table.add_row("Growth Spread (r - g)", "[dim]N/A[/dim]")
+        # Fallback to CPI
+        inflation = data.get("inflation_yoy")
+        if yield_10y is not None and inflation is not None:
+            real_yield = logic.calculate_real_yield(yield_10y, inflation)
+            monetary_table.add_row("Real Yield (CPI)", format_value(real_yield, "%", 2))
+            
+    # Term Premium
+    tp = data.get("term_premium_10y")
+    if yield_10y is not None and tp is not None:
+        monetary_table.add_row("Term Premium (Risk)", format_value(tp, "%", 2))
+        fed_exp = logic.calculate_fed_rate_expectation(yield_10y, tp)
+        monetary_table.add_row("Implied Fed Rate", format_value(fed_exp, "%", 2))
         
-    # Currency (if applicable)
-    if "usd_zar" in data and data["usd_zar"]:
-         monetary_table.add_row("USD/ZAR", format_value(data["usd_zar"], "", 2))
+    # Gold
+    gold = data.get("gold")
+    if gold:
+        monetary_table.add_row("Gold Price", format_value(gold, "", 0))
 
     # Add tables to grid
     grid.add_row(fiscal_table, monetary_table)

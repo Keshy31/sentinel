@@ -42,7 +42,10 @@ COUNTRIES = {
             "gdp_growth": "A191RL1Q225SBEA",        # Real GDP Growth
             "cpi": "CPIAUCSL",                      # Consumer Price Index
             "yield_10y": "^TNX",                    # 10Y Treasury Yield
-            "inflation_yoy": "CPIAUCSL"             # Using CPI to calc YoY
+            "inflation_yoy": "CPIAUCSL",            # Using CPI to calc YoY
+            "breakeven_5y": "T5YIE",                # 5-Year Breakeven Inflation Rate
+            "term_premium_10y": "ACMTP10",          # 10-Year Term Premium
+            "gold": "GC=F"                          # Gold Futures
         },
         "yield_curve": {
             "3M": "^IRX",
@@ -85,6 +88,60 @@ COUNTRIES = {
             "interest_rev_critical": 0.20,
             "currency_risk_critical": 19.0
         }
+    },
+    "JP": {
+        "name": "Japan",
+        "source_type": "FRED_API",
+        "currency_symbol": "¥",
+        "flag": "🇯🇵",
+        "metrics": {
+            "yield_10y": "IRLTLT01JPM156N",     # FRED Monthly Long-Term Govt Bond Yield
+            "gdp": "JPN_GDP_EST",               # Placeholder / Not fetched yet
+            "total_debt": "JPN_DEBT_EST"        # Placeholder
+        },
+        "yield_curve": {},
+        "thresholds": {
+            "debt_gdp_warning": 200.0,
+            "debt_gdp_critical": 250.0,
+            "interest_rev_warning": 0.18,
+            "interest_rev_critical": 0.20
+        }
+    },
+    "UK": {
+        "name": "United Kingdom",
+        "source_type": "FRED_API",
+        "currency_symbol": "£",
+        "flag": "🇬🇧",
+        "metrics": {
+            "yield_10y": "IRLTLT01GBM156N",     # FRED Monthly Long-Term Govt Bond Yield
+            "gdp": "GBR_GDP_EST",
+            "total_debt": "GBR_DEBT_EST"
+        },
+        "yield_curve": {},
+        "thresholds": {
+            "debt_gdp_warning": 90.0,
+            "debt_gdp_critical": 110.0,
+            "interest_rev_warning": 0.18,
+            "interest_rev_critical": 0.20
+        }
+    },
+    "DE": {
+        "name": "Germany",
+        "source_type": "FRED_API",
+        "currency_symbol": "€",
+        "flag": "🇩🇪",
+        "metrics": {
+            "yield_10y": "IRLTLT01DEM156N",     # FRED Monthly Long-Term Govt Bond Yield
+            "gdp": "DEU_GDP_EST",
+            "total_debt": "DEU_DEBT_EST"
+        },
+        "yield_curve": {},
+        "thresholds": {
+            "debt_gdp_warning": 60.0,
+            "debt_gdp_critical": 80.0,
+            "interest_rev_warning": 0.18,
+            "interest_rev_critical": 0.20
+        }
     }
 }
 
@@ -98,7 +155,14 @@ GLOBAL_SERIES = {
     "sp500": "^GSPC"                        # S&P 500
 }
 
-# Legacy mapping for data_loader compatibility (until fully refactored)
+# RSS Feeds for News Ticker
+RSS_FEEDS = [
+    "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664", # CNBC Finance
+    "https://finance.yahoo.com/news/rssindex", # Yahoo Finance
+    "http://feeds.marketwatch.com/marketwatch/topstories/" # MarketWatch
+]
+
+# Legacy mapping for data_loader compatibility
 FRED_SERIES = {
     "fed_assets": "WALCL",
     "tga": "WTREGEN",
