@@ -214,6 +214,13 @@ class FiscalDashboard(Container):
             daily_cost = logic.calculate_days_of_interest(debt, yield_10y)
             table.add_row("Daily Interest Cost", f"[bold red]{daily_cost:,.2f} B {currency}[/bold red]")
 
+        # Doom Loop Forecast (US Only)
+        if self.country_code == "US":
+            years, date_str = logic.predict_doom_loop_day_zero()
+            if years is not None:
+                color = "red" if years < 10 else "yellow"
+                table.add_row("Doom Loop Day Zero", f"[{color}]{years:.1f} Yrs ({date_str})[/{color}]")
+
     def _populate_monetary_table(self, table: DataTable, data: dict) -> None:
         # Yields
         y10 = data.get("yield_10y")
@@ -227,7 +234,22 @@ class FiscalDashboard(Container):
         if y10 and inf:
             real = logic.calculate_real_yield(y10, inf)
             color = "green" if real > 0 else "red"
-            table.add_row("Real Yield", f"[{color}]{real:+.2f}%[/{color}]")
+            table.add_row("Real Yield (CPI)", f"[{color}]{real:+.2f}%[/{color}]")
+
+        # Breakeven / Market Real Yield
+        breakeven = data.get("breakeven_5y")
+        if y10 is not None and breakeven is not None:
+            market_real_yield = logic.calculate_market_real_yield(y10, breakeven)
+            color = "green" if market_real_yield > 0 else "red"
+            table.add_row("Market Real Yield", f"[{color}]{market_real_yield:+.2f}%[/{color}]")
+            table.add_row("Inflation Exp (5Y)", f"{breakeven:.2f}%")
+        
+        # Term Premium
+        tp = data.get("term_premium_10y")
+        if y10 is not None and tp is not None:
+            fed_exp = logic.calculate_fed_rate_expectation(y10, tp)
+            table.add_row("Term Premium (Risk)", f"{tp:.2f}%")
+            table.add_row("Implied Fed Rate", f"{fed_exp:.2f}%")
             
         # Currency
         if "usd_zar" in data and data["usd_zar"]:
@@ -427,4 +449,3 @@ class SentinelApp(App):
 if __name__ == "__main__":
     app = SentinelApp()
     app.run()
-
