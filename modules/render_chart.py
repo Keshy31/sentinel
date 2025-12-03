@@ -253,7 +253,7 @@ def build_liquidity_chart(
     height: int = 15
 ) -> str:
     """
-    Build the 'Druckenmiller Chart' (Net Liquidity vs S&P 500).
+    Build the 'Druckenmiller Chart' (Net Liquidity vs S&P 500) with rolling correlation.
     
     Returns:
         ASCII chart string + Correlation Verdict.
@@ -270,21 +270,26 @@ def build_liquidity_chart(
         liquidity = df["Net_Liquidity"].tolist()
         sp500 = df["SP500"].tolist()
         
-        # Calculate Correlation
-        correlation = df["Net_Liquidity"].corr(df["SP500"])
+        # Calculate Correlation (overall)
+        overall_correlation = df["Net_Liquidity"].corr(df["SP500"])
         
+        # Calculate Rolling Correlation (window approx 10% of data points)
+        window = max(5, len(df) // 10) 
+        rolling_corr = df["Net_Liquidity"].rolling(window=window).corr(df["SP500"]).fillna(0).tolist()
+
         # Verdict
-        if correlation > 0.7:
+        if overall_correlation > 0.7:
             verdict = "[red]HIGH CORRELATION[/red] (Liquidity driving market)"
-        elif correlation > 0.4:
+        elif overall_correlation > 0.4:
             verdict = "[yellow]MODERATE CORRELATION[/yellow]"
         else:
             verdict = "[green]LOW CORRELATION[/green] (Market decoupled)"
             
         # Plotting
         plt.clf()
-        plt.plotsize(width, height)
-        plt.theme("dark")
+        
+        # Configure subplots (2 rows, 1 column)
+        plt.subplots(2, 1) 
         
         # Date labels (start, mid, end)
         date_labels = []
@@ -300,21 +305,27 @@ def build_liquidity_chart(
             
         x_vals = list(range(len(dates)))
         
-        # S&P 500 (Left Axis)
+        # Subplot 1: Liquidity vs S&P 500
+        plt.subplot(1, 1)
+        plt.plotsize(width, height) 
+        plt.theme("dark")
+        
         plt.plot(x_vals, sp500, label="S&P 500", color="blue", marker="braille")
-        plt.ylabel("S&P 500 Price")
-        
-        # Net Liquidity (Right Axis)
-        # plt.twin() is not available in all plotext versions or behaves differently.
-        # Instead, we will normalize the data to display both on the same relative scale
-        # or just plot them on the same axis if ranges are similar (which they are roughly: ~4000-6000 vs ~3000-8000).
-        # Actually, S&P 500 is ~4000-6000 and Net Liquidity is ~5000-8000 Billions. They are comparable!
-        # So we can plot them on the same axis without twin().
-        
         plt.plot(x_vals, liquidity, label="Net Liquidity (Billions)", color="orange", marker="braille")
-        plt.ylabel("Value (Points / $B)")
+        plt.ylabel("Value")
+        plt.title(f"Net Liquidity vs S&P 500 (Overall Corr: {overall_correlation:.2f})")
+        plt.xticks(date_positions, date_labels)
+
+        # Subplot 2: Rolling Correlation
+        plt.subplot(2, 1)
+        plt.plotsize(width, height // 2)
+        plt.theme("dark")
         
-        plt.title(f"THE PLUMBING: Net Liquidity vs S&P 500 (Corr: {correlation:.2f})")
+        plt.plot(x_vals, rolling_corr, label=f"Rolling Correlation ({window} periods)", color="magenta", marker="braille")
+        # Add zero line
+        plt.plot(x_vals, [0]*len(x_vals), color="gray", marker="sd")
+        plt.ylim(-1, 1)
+        plt.ylabel("Correlation")
         plt.xticks(date_positions, date_labels)
         
         chart_str = plt.build()

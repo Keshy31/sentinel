@@ -65,16 +65,21 @@ def create_indicators_panel(country_code: str, data: dict) -> Panel:
     flag = country_conf.get("flag", "")
     name = country_conf.get("name", country_code)
     
-    table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2), expand=True)
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="white", justify="right")
+    # Split into two columns
+    grid = Table.grid(expand=True, padding=(0, 2))
+    grid.add_column(ratio=1)
+    grid.add_column(ratio=1)
     
-    # 1. Core Fiscal Metrics
-    table.add_row("[bold]FISCAL[/bold]", "")
-    table.add_row("Total Public Debt", format_value(data.get("total_debt"), f" B {currency}", 0))
-    table.add_row("Interest Payments", format_value(data.get("interest_payments"), f" B {currency}", 1))
-    table.add_row("Tax Receipts", format_value(data.get("tax_receipts"), f" B {currency}", 1))
-    table.add_row("GDP", format_value(data.get("gdp"), f" B {currency}", 0))
+    # --- Left Column: FISCAL ---
+    fiscal_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2), expand=True)
+    fiscal_table.add_column("Metric", style="cyan")
+    fiscal_table.add_column("Value", style="white", justify="right")
+    
+    fiscal_table.add_row("[bold]FISCAL[/bold]", "")
+    fiscal_table.add_row("Total Public Debt", format_value(data.get("total_debt"), f" B {currency}", 0))
+    fiscal_table.add_row("Interest Payments", format_value(data.get("interest_payments"), f" B {currency}", 1))
+    fiscal_table.add_row("Tax Receipts", format_value(data.get("tax_receipts"), f" B {currency}", 1))
+    fiscal_table.add_row("GDP", format_value(data.get("gdp"), f" B {currency}", 0))
     
     # Interest/Revenue Ratio
     if data.get("interest_payments") and data.get("tax_receipts"):
@@ -84,9 +89,9 @@ def create_indicators_panel(country_code: str, data: dict) -> Panel:
         )
         warn = thresholds.get("interest_rev_warning", 0.15)
         crit = thresholds.get("interest_rev_critical", 0.20)
-        table.add_row("Interest/Revenue", format_ratio_with_status(ratio, warn, crit))
+        fiscal_table.add_row("Interest/Revenue", format_ratio_with_status(ratio, warn, crit))
     else:
-        table.add_row("Interest/Revenue", "[dim]N/A[/dim]")
+        fiscal_table.add_row("Interest/Revenue", "[dim]N/A[/dim]")
 
     # Debt/GDP Ratio
     debt_gdp = None
@@ -100,27 +105,31 @@ def create_indicators_panel(country_code: str, data: dict) -> Panel:
         if debt_gdp >= crit: color = "red"
         elif debt_gdp >= warn: color = "yellow"
         
-        table.add_row("Debt/GDP", f"[{color}]{debt_gdp:,.1f}%[/{color}]")
+        fiscal_table.add_row("Debt/GDP", f"[{color}]{debt_gdp:,.1f}%[/{color}]")
     else:
-        table.add_row("Debt/GDP", "[dim]N/A[/dim]")
+        fiscal_table.add_row("Debt/GDP", "[dim]N/A[/dim]")
 
-    table.add_row("", "")
-    table.add_row("[bold]MONETARY & ECONOMIC[/bold]", "")
+    # --- Right Column: MONETARY & ECONOMIC ---
+    monetary_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2), expand=True)
+    monetary_table.add_column("Metric", style="cyan")
+    monetary_table.add_column("Value", style="white", justify="right")
 
+    monetary_table.add_row("[bold]MONETARY & ECONOMIC[/bold]", "")
+    
     # Yields & Inflation
     yield_10y = data.get("yield_10y")
-    table.add_row("10Y Bond Yield", format_value(yield_10y, "%", 2))
+    monetary_table.add_row("10Y Bond Yield", format_value(yield_10y, "%", 2))
     
     inflation = data.get("inflation_yoy")
-    table.add_row("Inflation (YoY)", format_value(inflation, "%", 2))
+    monetary_table.add_row("Inflation (YoY)", format_value(inflation, "%", 2))
     
     # Real Yield (r - i)
     if yield_10y is not None and inflation is not None:
         real_yield = logic.calculate_real_yield(yield_10y, inflation)
         color = "green" if real_yield > 0 else "red"
-        table.add_row("Real Yield (r - i)", f"[{color}]{real_yield:+.2f}%[/{color}]")
+        monetary_table.add_row("Real Yield (r - i)", f"[{color}]{real_yield:+.2f}%[/{color}]")
     else:
-         table.add_row("Real Yield (r - i)", "[dim]N/A[/dim]")
+         monetary_table.add_row("Real Yield (r - i)", "[dim]N/A[/dim]")
          
     # Growth Spread (r - g)
     gdp_growth = data.get("gdp_growth")
@@ -128,14 +137,16 @@ def create_indicators_panel(country_code: str, data: dict) -> Panel:
         spread = logic.calculate_growth_spread(yield_10y, gdp_growth)
         status = logic.get_growth_spread_status(spread)
         color = "red" if status == "CRITICAL" else "green"
-        table.add_row("Growth Spread (r - g)", f"[bold {color}]{spread:+.2f}%[/bold {color}]")
+        monetary_table.add_row("Growth Spread (r - g)", f"[bold {color}]{spread:+.2f}%[/bold {color}]")
     else:
-        table.add_row("Growth Spread (r - g)", "[dim]N/A[/dim]")
+        monetary_table.add_row("Growth Spread (r - g)", "[dim]N/A[/dim]")
         
     # Currency (if applicable)
     if "usd_zar" in data and data["usd_zar"]:
-         table.add_row("USD/ZAR", format_value(data["usd_zar"], "", 2))
+         monetary_table.add_row("USD/ZAR", format_value(data["usd_zar"], "", 2))
 
+    # Add tables to grid
+    grid.add_row(fiscal_table, monetary_table)
 
     # Alerts Section
     alerts = []
@@ -157,23 +168,15 @@ def create_indicators_panel(country_code: str, data: dict) -> Panel:
         if ratio >= crit:
              alerts.append("[bold white on red]⚠️ DEBT SPIRAL DETECTED[/bold white on red]")
 
+    # Combine Grid and Alerts
+    final_group_items = [grid]
+    
     if alerts:
-        table.add_row("", "")
-        for alert in alerts:
-            table.add_row(alert, "")
+        alert_text = Text("\n".join(alerts), justify="center")
+        final_group_items.append(Text("")) # Spacer
+        final_group_items.append(alert_text)
 
-    # Sparkline (10Y Yield History)
-    sparkline_ticker = country_conf.get("metrics", {}).get("yield_10y")
-    if sparkline_ticker:
-        sparkline = render_chart.build_sparkline(sparkline_ticker, months=6, width=60, height=5)
-        content = Group(
-            table,
-            Text(""),
-            Text("10Y Yield Trend (6mo):", style="dim cyan"),
-            Text.from_ansi(sparkline)
-        )
-    else:
-        content = table
+    content = Group(*final_group_items)
 
     # Border Color Logic
     border_style = "blue"
@@ -189,26 +192,21 @@ def create_indicators_panel(country_code: str, data: dict) -> Panel:
 
 
 def create_charts_panel(country_code: str) -> Group:
-    """Create the historical charts panel (Split Left/Right)."""
+    """Create the historical charts panel (Stacked Vertically)."""
     
-    # Left: Yield Curve
-    yield_curve_chart = render_chart.build_yield_curve_chart(country_code, width=75, height=15)
+    # Top: Yield Curve
+    yield_curve_chart = render_chart.build_yield_curve_chart(country_code, width=140, height=15)
     
-    # Right: Net Liquidity (Global Context)
-    liquidity_chart = render_chart.build_liquidity_chart(width=75, height=15)
-    
-    # We use a Layout object to split them? 
-    # Actually, Rich Panels can contain Layouts? No, Layouts contain Panels.
-    # But this function returns a Panel or Group to be put into a Layout slot.
-    # If I return a Group, they stack vertically.
-    # To split horizontally within this panel, I need to use Columns or Table.
+    # Bottom: Net Liquidity (Global Context)
+    liquidity_chart = render_chart.build_liquidity_chart(width=140, height=15)
     
     grid = Table.grid(expand=True)
     grid.add_column(ratio=1)
-    grid.add_column(ratio=1)
     
     grid.add_row(
-        Panel(Text.from_ansi(yield_curve_chart), title="Yield Curve Structure", border_style="green"),
+        Panel(Text.from_ansi(yield_curve_chart), title="Yield Curve Structure", border_style="green")
+    )
+    grid.add_row(
         Panel(Text.from_ansi(liquidity_chart), title="Global Liquidity Context", border_style="yellow")
     )
     
