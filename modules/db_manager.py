@@ -23,10 +23,19 @@ class DatabaseManager:
             
         self.cache_dir = config.DATA_DIR / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._shared_conn = None
 
     def _get_connection(self) -> duckdb.DuckDBPyConnection:
-        """Create a database connection."""
-        return duckdb.connect(str(self.db_path))
+        """Get a cursor from the shared database connection."""
+        if self._shared_conn is None:
+            try:
+                self._shared_conn = duckdb.connect(str(self.db_path))
+            except Exception as e:
+                # Fallback or retry logic could go here, but for now raise
+                raise IOError(f"Failed to connect to DuckDB at {self.db_path}: {e}")
+        
+        # Return a cursor so the caller can close it without closing the main connection
+        return self._shared_conn.cursor()
 
     def init_db(self) -> None:
         """Initialize the database tables."""

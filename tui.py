@@ -38,7 +38,7 @@ class NewsTicker(Static):
         """Start background fetch and scroll."""
         self.update_news()
         self.set_interval(600, self.update_news) # Fetch every 10 mins
-        self.set_interval(0.2, self.scroll_ticker) # Scroll speed
+        self.set_interval(4.0, self.scroll_ticker) 
         
     def update_news(self) -> None:
         """Fetch RSS feeds in background."""
@@ -134,7 +134,7 @@ class FiscalDashboard(Container):
 
     def _fetch_data(self):
         data = data_loader.get_country_metrics(self.country_code)
-        self.call_from_thread(self.update_ui, data)
+        self.update_ui(data)
 
     def update_ui(self, data: dict) -> None:
         self.query_one(f"#loading-{self.country_code}").display = False
@@ -316,7 +316,7 @@ class GlobalGrid(Container):
             
             rows.append((config.COUNTRIES[code]["flag"] + " " + code, y10, dg, ir, status))
             
-        self.call_from_thread(self.update_table, rows)
+        self.update_table(rows)
 
     def update_table(self, rows: List[tuple]):
         table = self.query_one(DataTable)
@@ -336,12 +336,12 @@ class LiquidityPanel(Container):
         self.load_chart()
         
     def load_chart(self):
-        self.run_worker(self._render, thread=True)
+        self.run_worker(self._update_chart, thread=True)
         
-    def _render(self):
+    def _update_chart(self):
         # This can be slow, so run in worker
         chart_str = render_chart.build_liquidity_chart(width=100, height=20)
-        self.call_from_thread(self.query_one("#liquidity-chart").update, Text.from_ansi(chart_str))
+        self.query_one("#liquidity-chart").update(Text.from_ansi(chart_str))
 
 
 class SentinelApp(App):
@@ -410,7 +410,7 @@ class SentinelApp(App):
     .alert-bar.critical {
         background: red;
         color: white;
-        animate: blink 1s;
+        /* animate: blink 1s; - Textual doesn't support animate property yet */
     }
     """
     

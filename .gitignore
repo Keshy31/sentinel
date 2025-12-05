@@ -36,6 +36,7 @@ sentinel.db
 sentinel.duckdb
 data/cache/
 *.parquet
+*.wal
 
 # OS
 .DS_Store
